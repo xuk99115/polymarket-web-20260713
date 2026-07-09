@@ -10,7 +10,13 @@ import {
 
 // ========= Web UI 鉴权: SSH 隧道访问无需手填；公网/API 客户端可用 X-Api-Key =========
 const WEB_TOKEN_KEY = 'web_token';
-const API_BASE = '';
+const API_BASE = (() => {
+    const path = window.location.pathname || '';
+    if (path.startsWith('/proxy/')) {
+        return path.endsWith('/') ? path.slice(0, -1) : path;
+    }
+    return '';
+})();
 const _origFetch = window.fetch.bind(window);
 let _webTokenPromise = null;
 
