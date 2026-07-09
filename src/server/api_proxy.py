@@ -5,6 +5,8 @@ status_server Polymarket API 代理模块
 """
 
 import json
+import os
+import socket
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -15,7 +17,6 @@ from src.server.helpers import (
 )
 
 # 项目路径
-import os
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(os.path.dirname(CURRENT_DIR))
 DATA_DIR = os.path.join(ROOT_DIR, "data")
@@ -24,6 +25,41 @@ DATA_DIR = os.path.join(ROOT_DIR, "data")
 CLOB_BASE = "https://clob.polymarket.com"
 DATA_API_BASE = "https://data-api.polymarket.com"
 GAMMA_BASE = "https://gamma-api.polymarket.com"
+
+
+def _is_local_proxy_url(value: str) -> tuple[str, int] | None:
+    try:
+        parsed = urllib.parse.urlparse(str(value or "").strip())
+        if parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+            return None
+        if not parsed.port:
+            return None
+        return parsed.hostname, int(parsed.port)
+    except Exception:
+        return None
+
+
+def _should_bypass_dead_local_proxy() -> bool:
+    """If proxy env points to a dead localhost port, bypass urllib env proxies."""
+    for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+        proxy = os.environ.get(key)
+        endpoint = _is_local_proxy_url(proxy)
+        if not endpoint:
+            continue
+        host, port = endpoint
+        try:
+            with socket.create_connection((host, port), timeout=0.25):
+                return False
+        except OSError:
+            return True
+    return False
+
+
+def _urlopen(req, timeout=10):
+    if _should_bypass_dead_local_proxy():
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        return opener.open(req, timeout=timeout)
+    return urllib.request.urlopen(req, timeout=timeout)
 
 
 def _parse_json_list(value):
@@ -79,7 +115,7 @@ def http_json_get(url, timeout=10):
     req.add_header("Accept", "application/json")
     req.add_header("User-Agent", "Mozilla/5.0")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
         body = e.read().decode() if e.fp else ""
@@ -100,7 +136,7 @@ def clob_get(path, api_key="", api_secret="", passphrase="", timeout=10):
         for k, v in headers.items():
             req.add_header(k, v)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
         body = e.read().decode() if e.fp else ""
@@ -116,7 +152,7 @@ def data_api_get(path, timeout=10):
     req.add_header("Accept", "application/json")
     req.add_header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
         body = e.read().decode() if e.fp else ""

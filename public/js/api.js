@@ -12,6 +12,30 @@ import {
 const WEB_TOKEN_KEY = 'web_token';
 const API_BASE = '';
 const _origFetch = window.fetch.bind(window);
+let _webTokenPromise = null;
+
+async function ensureWebToken() {
+    if (getWebToken()) return getWebToken();
+    if (_webTokenPromise) return _webTokenPromise;
+    _webTokenPromise = (async () => {
+        try {
+            const resp = await _origFetch('/api/web-token?ts=' + Date.now(), { cache: 'no-store' });
+            if (!resp.ok) return null;
+            const data = await resp.json();
+            if (data && data.token) {
+                setWebToken(data.token);
+                return data.token;
+            }
+        } catch (_) {
+            return null;
+        } finally {
+            _webTokenPromise = null;
+        }
+        return null;
+    })();
+    return _webTokenPromise;
+}
+
 window.fetch = function(input, init = {}) {
     // 绕过代理：相对路径 /api/* 改为 127.0.0.1 直连
     if (typeof input === 'string' && (input.startsWith('/api/') || input.startsWith('/status-json'))) {
@@ -19,13 +43,19 @@ window.fetch = function(input, init = {}) {
     } else if (typeof input === 'object' && input?.url && (input.url.startsWith('/api/') || input.url.startsWith('/status-json'))) {
         input = new Request(API_BASE + input.url, input);
     }
-    const token = getWebToken();
-    if (token) {
-        const headers = new Headers(init.headers || {});
-        headers.set('X-Api-Key', token);
-        init = { ...init, headers };
-    }
-    return _origFetch(input, init);
+    const isTokenBootstrap = typeof input === 'string' && input.startsWith('/api/web-token');
+    return (async () => {
+        if (!isTokenBootstrap && (typeof input === 'string' ? input.startsWith('/api/') || input.startsWith('/status-json') : true)) {
+            await ensureWebToken();
+        }
+        const token = getWebToken();
+        if (token) {
+            const headers = new Headers(init.headers || {});
+            headers.set('X-Api-Key', token);
+            init = { ...init, headers };
+        }
+        return _origFetch(input, init);
+    })();
 };
 
 export function setWebToken(token) {
@@ -44,6 +74,7 @@ export function getWebToken() {
 }
 window.setWebToken = setWebToken;
 window.getWebToken = getWebToken;
+window.ensureWebToken = ensureWebToken;
 
 export async function fetchBtc() {
     try {

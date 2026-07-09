@@ -603,6 +603,8 @@ class StatusHandler(http.server.SimpleHTTPRequestHandler):
 
     def _require_auth(self) -> bool:
         parsed = urlparse(self.path)
+        if parsed.path == "/api/web-token":
+            return True
         if self._is_public_path(parsed.path):
             return True
         return self._check_token()
@@ -792,6 +794,9 @@ class StatusHandler(http.server.SimpleHTTPRequestHandler):
         if path in {"/status-json", "/api/status"}:
             data = load_status_from_file()
             send_json(self, data or {})
+
+        elif path == "/api/web-token":
+            send_json(self, {"token": WEB_API_TOKEN})
 
         # === BTC 实时价格 ===
         elif path == "/api/btc":
