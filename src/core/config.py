@@ -1,114 +1,154 @@
 import os
 import json
+import time
+import threading
 from dotenv import dotenv_values, load_dotenv
 from zoneinfo import ZoneInfo
 from pathlib import Path
+from typing import Any, Dict, Optional
 
-# 路径设置
+# ============================================================
+# 路径常量（启动时定一次，运行中不会变）
+# ============================================================
 BASE_DIR = Path(__file__).parent.parent.parent.absolute()
-_current_dir = BASE_DIR
-DATA_DIR = os.path.join(_current_dir, "data")
-DOCS_DIR = os.path.join(_current_dir, "docs")
+DATA_DIR = os.path.join(BASE_DIR, "data")
+DOCS_DIR = os.path.join(BASE_DIR, "docs")
 STATUS_FILE = os.path.join(DATA_DIR, "bot_status.json")
 PAPER_STATE_FILE = os.path.join(DATA_DIR, "paper_trade_state.json")
-REPORT_FILE = os.path.join(DOCS_DIR, "paper_trade_report.md")  # 报告归档至 docs/
+REPORT_FILE = os.path.join(DOCS_DIR, "paper_trade_report.md")
 CONTROL_FILE = os.path.join(DATA_DIR, "trading_control.json")
-ENV_FILE = os.path.join(_current_dir, ".env")
+ENV_FILE = os.path.join(BASE_DIR, ".env")
 
-# 加载环境变量
+# 时区常量
+NY_TZ = ZoneInfo("America/New_York")
+
+# 加载环境变量（仅在缺失时填充，override=True 保证 .env 覆盖已有 env）
 load_dotenv(ENV_FILE, override=True)
 
-class Config:
+
+class _ConfigCache:
+    """轻量级 TTL 缓存，避免每次 Config.get 都重新读盘。
+
+    - runtime cache: 来自 trading_control.json（Web 面板可热更）
+    - env cache: 来自 .env（Web 面板写 .env 后热更）
+    - 2 秒 TTL: 既能反映热更，又不会高频 IO
+    """
+
+    TTL_SECONDS = 2.0
+
+    def __init__(self):
+        self._runtime_lock = threading.Lock()
+        self._env_lock = threading.Lock()
+        self._runtime_cache: Optional[Dict[str, Any]] = None
+        self._runtime_at: float = 0.0
+        self._env_cache: Optional[Dict[str, Any]] = None
+        self._env_at: float = 0.0
+
+    def runtime(self) -> Dict[str, Any]:
+        with self._runtime_lock:
+            now = time.time()
+            if self._runtime_cache is not None and (now - self._runtime_at) < self.TTL_SECONDS:
+                return self._runtime_cache
+            self._runtime_cache = self._read_runtime()
+            self._runtime_at = now
+            return self._runtime_cache
+
+    def env(self) -> Dict[str, Any]:
+        with self._env_lock:
+            now = time.time()
+            if self._env_cache is not None and (now - self._env_at) < self.TTL_SECONDS:
+                return self._env_cache
+            self._env_cache = self._read_env()
+            self._env_at = now
+            return self._env_cache
+
+    def invalidate(self):
+        """外部修改了 .env / trading_control.json 后可主动失效缓存。"""
+        with self._runtime_lock:
+            self._runtime_cache = None
+            self._runtime_at = 0.0
+        with self._env_lock:
+            self._env_cache = None
+            self._env_at = 0.0
+
     @staticmethod
-    def get_runtime_config():
-        """从 trading_control.json 加载运行时配置（允许 Web 端覆盖）"""
+    def _read_runtime() -> Dict[str, Any]:
         if os.path.exists(CONTROL_FILE):
             try:
                 with open(CONTROL_FILE, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except:
-                pass
+                    return json.load(f) or {}
+            except Exception:
+                return {}
         return {}
 
     @staticmethod
-    def get_env_config():
-        """直接从 .env 读取最新值，支持运行中热更新。"""
+    def _read_env() -> Dict[str, Any]:
         try:
-            return dotenv_values(ENV_FILE)
+            return {k: v for k, v in dotenv_values(ENV_FILE).items() if v not in (None, "")}
         except Exception:
             return {}
 
-    @classmethod
-    def get(cls, key, default=None):
-        runtime = cls.get_runtime_config()
-        # 运行时配置优先级最高
+
+_CACHE = _ConfigCache()
+
+
+class Config:
+    """统一配置入口。
+
+    优先级: trading_control.json (Web 端运行时配置) > .env > 进程 env > 默认值
+    所有数值/模式/凭证读取都走这里，每次最多触发一次磁盘 IO（2s TTL 缓存）。
+    """
+
+    @staticmethod
+    def invalidate():
+        """外部写盘后调用，强制下次重新读。"""
+        _CACHE.invalidate()
+
+    @staticmethod
+    def get(key: str, default: Any = None) -> Any:
+        runtime = _CACHE.runtime()
         if key in runtime:
             return runtime[key]
-        env_config = cls.get_env_config()
+        env_config = _CACHE.env()
         if key in env_config and env_config[key] not in (None, ""):
             return env_config[key]
         return os.getenv(key, default)
 
-    @classmethod
-    def get_bool(cls, key, default="true"):
-        val = str(cls.get(key, default)).lower()
+    @staticmethod
+    def get_bool(key: str, default: str = "true") -> bool:
+        val = str(Config.get(key, default)).lower()
         return val in ("true", "1", "yes", "on")
 
-    @classmethod
-    def get_float(cls, key, default="0"):
-        return float(cls.get(key, default))
+    @staticmethod
+    def get_float(key: str, default: str = "0") -> float:
+        try:
+            return float(Config.get(key, default))
+        except (ValueError, TypeError):
+            return float(default)
 
-    @classmethod
-    def get_int(cls, key, default="0"):
-        return int(cls.get(key, default))
+    @staticmethod
+    def get_int(key: str, default: str = "0") -> int:
+        try:
+            return int(Config.get(key, default))
+        except (ValueError, TypeError):
+            return int(default)
 
-# -------------------- 常量映射 --------------------
 
-# 环境与地址
-NY_TZ = ZoneInfo("America/New_York")
+# 便捷模块级函数（方便 from src.core.config import invalidate; invalidate()）
+invalidate = Config.invalidate
+
+
+# ============================================================
+# 启动时定一次的常量（API 凭证 / 钱包地址 / 签名类型）
+# 改完这些需要重启进程才生效
+# ============================================================
 POLYMARKET_WALLET_ADDRESS = Config.get("POLYMARKET_WALLET_ADDRESS", "")
 POLYMARKET_FUNDER_ADDRESS = Config.get("POLYMARKET_FUNDER_ADDRESS", POLYMARKET_WALLET_ADDRESS)
 POLYMARKET_SIGNATURE_TYPE = Config.get_int("POLYMARKET_SIGNATURE_TYPE", "1")
 
-# API 凭证 (支持动态覆盖)
 POLYMARKET_API_KEY = Config.get("POLYMARKET_API_KEY", "")
 POLYMARKET_API_SECRET = Config.get("POLYMARKET_API_SECRET", "")
 POLYMARKET_API_PASSPHRASE = Config.get("POLYMARKET_API_PASSPHRASE", "")
 POLYMARKET_PRIVATE_KEY = Config.get("POLYMARKET_PRIVATE_KEY", "")
 
-# 交易基础配置
-BET_AMOUNT = Config.get_float("BET_AMOUNT", "5")
-MAX_BET_AMOUNT = Config.get_float("MAX_BET_AMOUNT", "50")
-MIN_PROBABILITY_DIFF = Config.get_float("MIN_PROBABILITY_DIFF", "0.1")
-STOP_LOSS_ENABLED = Config.get_bool("STOP_LOSS_ENABLED", "true")
-STOP_LOSS_PERCENT = Config.get_float("STOP_LOSS_PERCENT", "0.10")
-TAKE_PROFIT_PERCENT = Config.get_float("TAKE_PROFIT_PERCENT", "0.18")
-
-# 模式配置
-TRADING_MODE = Config.get("TRADING_MODE", "paper").strip().lower()
-PAPER_START_BALANCE = Config.get_float("PAPER_START_BALANCE", "100")
-PAPER_BET_AMOUNT = Config.get_float("PAPER_BET_AMOUNT", str(BET_AMOUNT))
-PAPER_TAKE_PROFIT_USD = Config.get_float("PAPER_TAKE_PROFIT_USD", "0.12")
-PAPER_POLL_INTERVAL_SECONDS = Config.get_int("PAPER_POLL_INTERVAL_SECONDS", "15")
-
-# AI 配置
-AI_ENABLED = Config.get_bool("AI_ENABLED", "true")
-AI_DECISION_INTERVAL_SECONDS = Config.get_int("AI_DECISION_INTERVAL_SECONDS", "180")
-AI_BASE_URL = Config.get("AI_BASE_URL", "https://api.openai.com/v1")
 AI_API_KEY = Config.get("AI_API_KEY", "")
-AI_MODEL = Config.get("AI_MODEL", "gpt-4o-mini")
-AI_TEMPERATURE = Config.get_float("AI_TEMPERATURE", "0.7")
-
-# 市场配置
-BTC_UPDOWN_MARKET_ID = Config.get("BTC_UPDOWN_MARKET_ID", "")
-BTC_PRICE_SOURCE = Config.get("BTC_PRICE_SOURCE", "binance")
-MARKET_SELECTION_MODE = Config.get("MARKET_SELECTION_MODE", "manual")
-TARGET_MARKET_SLUG = Config.get("TARGET_MARKET_SLUG", "")
-TARGET_MARKET_URL = Config.get("TARGET_MARKET_URL", "")
-STRATEGY_PROFILE = Config.get("STRATEGY_PROFILE", "generic_binary")
-ALLOW_MULTI_OUTCOME = Config.get_bool("ALLOW_MULTI_OUTCOME", "false")
-
-# 实盘额外配置
-DRY_RUN = Config.get_bool("DRY_RUN", "true")
-LIVE_BET_AMOUNT = Config.get_float("LIVE_BET_AMOUNT", "1")
-LIVE_MAX_OPEN_POSITIONS = Config.get_int("LIVE_MAX_OPEN_POSITIONS", "1")

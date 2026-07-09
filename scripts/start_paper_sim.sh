@@ -9,8 +9,31 @@ BOT_PID_FILE="$RUNTIME_DIR/paper_bot.pid"
 SERVER_PID_FILE="$RUNTIME_DIR/status_server.pid"
 BOT_LOG="$RUNTIME_DIR/paper_bot.log"
 SERVER_LOG="$RUNTIME_DIR/status_server.log"
+STATUS_PORT="${STATUS_PORT:-8889}"
 
 mkdir -p "$RUNTIME_DIR"
+
+force_stop_pid() {
+    local pid="$1"
+    local label="${2:-process}"
+    if [[ -z "${pid:-}" ]] || ! kill -0 "$pid" 2>/dev/null; then
+        return 0
+    fi
+
+    kill -TERM "$pid" 2>/dev/null || true
+    for _ in 1 2 3 4 5; do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            return 0
+        fi
+        sleep 1
+    done
+
+    if kill -0 "$pid" 2>/dev/null; then
+        echo "强制停止残留 ${label} PID: $pid"
+        kill -KILL "$pid" 2>/dev/null || true
+        sleep 1
+    fi
+}
 
 stop_pid_file() {
     local pid_file="$1"
@@ -18,8 +41,7 @@ stop_pid_file() {
         local pid
         pid="$(cat "$pid_file")"
         if [[ -n "${pid:-}" ]] && kill -0 "$pid" 2>/dev/null; then
-            kill "$pid" 2>/dev/null || true
-            sleep 1
+            force_stop_pid "$pid" "$(basename "$pid_file")"
         fi
         rm -f "$pid_file"
     fi
@@ -30,14 +52,15 @@ stop_port_listener() {
     local pids
     pids="$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
     if [[ -n "${pids:-}" ]]; then
-        kill $pids 2>/dev/null || true
-        sleep 1
+        for pid in $pids; do
+            force_stop_pid "$pid" "port-$port-listener"
+        done
     fi
 }
 
 stop_pid_file "$BOT_PID_FILE"
 stop_pid_file "$SERVER_PID_FILE"
-stop_port_listener 8889
+stop_port_listener "$STATUS_PORT"
 
 archive_previous_run() {
     local archive_root="$ROOT_DIR/history"
@@ -96,8 +119,17 @@ cd "$ROOT_DIR"
 launch_bg() {
     local log_file="$1"
     shift
-    nohup "$@" >"$log_file" 2>&1 </dev/null &
-    echo "$!"
+    # 用 scripts/daemonize.py 启动命令 (macOS 没有 setsid(1))。
+    #
+    # 为什么需要 daemonize: 纯 nohup 只能免疫 SIGHUP (终端挂断)。Hermes 每次
+    # session 结束时会对整个进程组发 SIGTERM/SIGKILL,纯 nohup 挡不住。
+    # daemonize 用经典 double-fork + os.setsid() 让 bot 跳出当前进程组,
+    # PPID 变 1 (launchd),完全脱离任何 shell/session 的生命周期。
+    #
+    # daemonize.py stdout 输出 grandchild PID,bash 用 command substitution 拿到。
+    local daemon_pid
+    daemon_pid="$("$ROOT_DIR/venv/bin/python3" "$ROOT_DIR/scripts/daemonize.py" "$log_file" "$@")"
+    echo "$daemon_pid"
 }
 
 BOT_PID="$(launch_bg "$BOT_LOG" ./venv/bin/python3 -u bot.py)"
@@ -123,6 +155,6 @@ fi
 echo "模拟交易已启动"
 echo "Bot PID: $BOT_PID"
 echo "Server PID: $SERVER_PID"
-echo "Dashboard: http://localhost:8889"
+echo "Dashboard: http://localhost:${STATUS_PORT}"
 echo "Bot Log: $BOT_LOG"
 echo "Server Log: $SERVER_LOG"

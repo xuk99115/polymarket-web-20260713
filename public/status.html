@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Orbitron:wght@500;700;800&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="status.css?v=20260316p">
+    <link rel="stylesheet" href="status.css?v=20260703f">
 </head>
 <body>
     <div class="app-bg">
@@ -51,6 +51,18 @@
     <main class="main-grid">
         <!-- ========= 左列 ========= -->
         <div class="col-left">
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">实例视图</span>
+                    <span class="panel-badge" id="system-view-badge">15m 主系统</span>
+                </div>
+                <div class="panel-caption">切换要观察的模拟系统；本金、持仓、交易流水都会按实例分开显示。</div>
+                <div class="account-switch topbar-switch" id="system-view-switch">
+                    <button class="switch-btn active" id="switch-primary-system" onclick="setSystemView('primary')">15m 主系统</button>
+                    <button class="switch-btn" id="switch-parallel-system" onclick="setSystemView('parallel')">5m 对冲系统</button>
+                </div>
+            </div>
+
             <!-- 三个指标卡 -->
             <div class="metrics-row" id="metrics-row">
                 <div class="metric-card balance-card" id="paper-balance-card">
@@ -72,6 +84,17 @@
                     <div class="metric-label">参考 BTC 价格</div>
                     <div class="metric-value mono" id="btc-price">--</div>
                     <div class="metric-sub" id="btc-change">--</div>
+                    <div class="btc-trend-grid" id="btc-trend-grid">
+                        <div class="btc-trend-cell"><span class="btc-trend-label">1m</span><span class="btc-trend-val mono" id="btc-1m">--</span></div>
+                        <div class="btc-trend-cell"><span class="btc-trend-label">3m</span><span class="btc-trend-val mono" id="btc-3m">--</span></div>
+                        <div class="btc-trend-cell"><span class="btc-trend-label">5m</span><span class="btc-trend-val mono" id="btc-5m">--</span></div>
+                        <div class="btc-trend-cell"><span class="btc-trend-label">15m</span><span class="btc-trend-val mono" id="btc-15m">--</span></div>
+                    </div>
+                    <div class="btc-trend-foot">
+                        <span>区间 <span class="mono" id="btc-range-low">--</span> → <span class="mono" id="btc-range-high">--</span></span>
+                        <span>位置 <span class="mono" id="btc-range-pos">--</span></span>
+                    </div>
+                    <canvas id="btc-sparkline" class="btc-sparkline"></canvas>
                 </div>
                 <div class="metric-card signal-card">
                     <div class="metric-label">AI预测</div>
@@ -129,27 +152,58 @@
             </div>
 
             <!-- 最近交易 -->
-            <div class="panel flex-grow">
+            <div class="panel flex-grow trade-panel">
                 <div class="panel-header">
                     <span class="panel-title" id="trade-panel-title">全部模拟交易流水</span>
                     <span class="panel-badge" id="trade-count">0 笔</span>
                 </div>
                 <div class="panel-caption" id="trade-panel-caption">完整展示这轮测试的全部交易记录，包含开仓、平仓、盈利/亏损和每一步的操作说明。</div>
+                <div class="trade-toolbar">
+                    <div class="trade-toolbar-stats">
+                        <div class="trade-stat-chip">
+                            <span>进行中</span>
+                            <strong class="mono" id="trade-open-count">0</strong>
+                        </div>
+                        <div class="trade-stat-chip">
+                            <span>已平仓</span>
+                            <strong class="mono" id="trade-closed-count">0</strong>
+                        </div>
+                        <div class="trade-stat-chip">
+                            <span>累计已实现</span>
+                            <strong class="mono" id="trade-realized-pnl">$0.00</strong>
+                        </div>
+                    </div>
+                </div>
                 <div class="table-wrap">
                     <table class="data-table">
+                        <colgroup>
+                            <col class="trade-col-time">
+                            <col class="trade-col-strategy">
+                            <col class="trade-col-direction">
+                            <col class="trade-col-status">
+                            <col class="trade-col-shares">
+                            <col class="trade-col-entry">
+                            <col class="trade-col-exit">
+                            <col class="trade-col-result">
+                            <col class="trade-col-market">
+                            <col class="trade-col-action">
+                        </colgroup>
                         <thead>
                             <tr>
                                 <th>时间</th>
-                                <th>操作</th>
+                                <th>策略</th>
                                 <th>方向</th>
-                                <th>金额</th>
-                                <th>价格</th>
+                                <th>状态</th>
+                                <th>份数</th>
+                                <th>入场价</th>
+                                <th>平仓价</th>
                                 <th>结果</th>
-                                <th>说明</th>
+                                <th>盘口</th>
+                                <th>操作</th>
                             </tr>
                         </thead>
                         <tbody id="trades-body">
-                            <tr><td colspan="7" class="empty-row">暂无交易记录</td></tr>
+                            <tr><td colspan="10" class="empty-row">暂无交易记录</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -170,19 +224,84 @@
                 </div>
             </div>
 
-            <!-- AI 决策全记录 (合并了思考记录与历史) -->
             <div class="panel">
                 <div class="panel-header">
-                    <span class="panel-title">AI 决策执行流</span>
-                    <span class="panel-badge" id="ai-history-count">0 条</span>
+                    <span class="panel-title">双系统总览</span>
+                    <span class="panel-badge" id="parallel-badge">观察中</span>
                 </div>
-                <div class="panel-caption">顶部展示最新 AI 深度逻辑（依据与风险），下方记录历史决策及执行结果。</div>
-                <div class="ai-history-list" id="ai-history-list">
-                    <div class="empty-row">等待 AI 生成第一条决策记录...</div>
+                <div class="panel-caption">主 15m 和 5m 对冲系统的本金、开仓数与最新执行状态一屏对照。</div>
+                <div class="capital-wrap">
+                    <div class="perf-stats-grid" style="margin-bottom:14px;">
+                        <div class="perf-stat-box">
+                            <span class="perf-label">总模拟权益</span>
+                            <span class="perf-val mono" id="systems-total-balance">--</span>
+                        </div>
+                        <div class="perf-stat-box">
+                            <span class="perf-label">总进行中仓位</span>
+                            <span class="perf-val mono" id="systems-total-open">--</span>
+                        </div>
+                        <div class="perf-stat-box">
+                            <span class="perf-label">15m 已实现</span>
+                            <span class="perf-val mono" id="systems-primary-pnl">--</span>
+                        </div>
+                        <div class="perf-stat-box">
+                            <span class="perf-label">5m 已实现</span>
+                            <span class="perf-val mono" id="systems-parallel-pnl">--</span>
+                        </div>
+                    </div>
+                    <div class="perf-stats-grid">
+                        <div class="perf-stat-box">
+                            <span class="perf-label">15m 状态</span>
+                            <span class="perf-val mono" id="parallel-running">--</span>
+                        </div>
+                        <div class="perf-stat-box">
+                            <span class="perf-label">15m 权益</span>
+                            <span class="perf-val mono" id="parallel-mode">--</span>
+                        </div>
+                        <div class="perf-stat-box">
+                            <span class="perf-label">15m 开仓</span>
+                            <span class="perf-val mono" id="parallel-market">--</span>
+                        </div>
+                        <div class="perf-stat-box">
+                            <span class="perf-label">15m 最新动作</span>
+                            <span class="perf-val mono" id="parallel-summary">--</span>
+                        </div>
+                    </div>
+                    <div class="perf-stats-grid" style="margin-top:12px;">
+                        <div class="perf-stat-box">
+                            <span class="perf-label">5m 状态</span>
+                            <span class="perf-val mono" id="secondary-running">--</span>
+                        </div>
+                        <div class="perf-stat-box">
+                            <span class="perf-label">5m 权益</span>
+                            <span class="perf-val mono" id="secondary-mode">--</span>
+                        </div>
+                        <div class="perf-stat-box">
+                            <span class="perf-label">5m 开仓</span>
+                            <span class="perf-val mono" id="secondary-market">--</span>
+                        </div>
+                        <div class="perf-stat-box">
+                            <span class="perf-label">5m 最新动作</span>
+                            <span class="perf-val mono" id="secondary-summary">--</span>
+                        </div>
+                    </div>
                 </div>
             </div>
 
+            <!-- AI 决策全记录已隐藏 (2026-06-25: 反转+AI 均关闭, 无有用信息) -->
+
             <!-- 挂单 -->
+            <div class="panel" id="hedge-pairs-panel">
+                <div class="panel-header">
+                    <span class="panel-title" id="hedge-pairs-title">对冲对状态</span>
+                    <span class="panel-badge" id="hedge-pairs-count">0 组</span>
+                </div>
+                <div class="panel-caption" id="hedge-pairs-caption">显示 5m 单腿先行策略每一组首腿挂单、待补腿、锁利与离场状态，方便观察当前卡在哪一步。</div>
+                <div class="hedge-pairs-list" id="hedge-pairs-list">
+                    <div class="empty-row">当前没有对冲对记录</div>
+                </div>
+            </div>
+
             <div class="panel">
                 <div class="panel-header">
                     <span class="panel-title" id="position-panel-title">当前模拟持仓</span>
@@ -193,6 +312,64 @@
                     <div class="empty-row">暂无模拟持仓</div>
                 </div>
             </div>
+
+            <!-- 套利对子 (已移除 2026-06-25) -->
+
+            <!-- Fair Value 模型 -->
+            <div class="panel" id="fair-panel">
+                <div class="panel-header">
+                    <span class="panel-title">Fair Value 模型 (BTC 15m)</span>
+                    <span class="panel-badge" id="fair-direction-badge">--</span>
+                </div>
+                <div class="panel-caption">log-normal 价格模型 + 15m σ。Fair vs Market 的 edge 以 bps 显示，正值 = 市场低估 UP，负值 = 市场低估 DOWN。</div>
+                <div class="fair-grid">
+                    <div class="fair-cell fair-main">
+                        <span class="fair-label">Fair UP</span>
+                        <span class="fair-value mono" id="fair-up">--</span>
+                    </div>
+                    <div class="fair-cell fair-main">
+                        <span class="fair-label">Fair DOWN</span>
+                        <span class="fair-value mono" id="fair-down">--</span>
+                    </div>
+                    <div class="fair-cell">
+                        <span class="fair-label">Z-score</span>
+                        <span class="fair-value mono" id="fair-z">--</span>
+                    </div>
+                    <div class="fair-cell">
+                        <span class="fair-label">σ (15m)</span>
+                        <span class="fair-value mono" id="fair-sigma">--</span>
+                    </div>
+                    <div class="fair-cell fair-edge-cell">
+                        <span class="fair-label">Edge vs Market</span>
+                        <span class="fair-value mono" id="fair-edge">--</span>
+                        <span class="fair-sub" id="fair-edge-sub">等待市场数据</span>
+                    </div>
+                    <div class="fair-cell">
+                        <span class="fair-label">Ref Price</span>
+                        <span class="fair-value mono" id="fair-ref">--</span>
+                    </div>
+                </div>
+                <div class="fair-bar-wrap">
+                    <div class="fair-bar-track">
+                        <div class="fair-bar-fill fair-bar-up" id="fair-bar-up"></div>
+                        <div class="fair-bar-fill fair-bar-down" id="fair-bar-down"></div>
+                    </div>
+                    <div class="fair-bar-legend">
+                        <span class="c-green">UP <strong id="fair-bar-up-label">--</strong></span>
+                        <span class="c-red">DOWN <strong id="fair-bar-down-label">--</strong></span>
+                    </div>
+                </div>
+                <div class="fv-training-strip" id="fv-training-strip">
+                    <span class="fv-training-pill">训练模式: <strong id="fv-train-enabled">--</strong></span>
+                    <span class="fv-training-pill">LowBuy FV拦截: <strong id="fv-lowbuy-filter">--</strong></span>
+                    <span class="fv-training-pill">samples: <strong id="fv-samples">--</strong></span>
+                    <span class="fv-training-pill">refs: <strong id="fv-refs">--</strong></span>
+                    <span class="fv-training-pill">当前ref: <strong id="fv-current-ref">--</strong></span>
+                    <span class="fv-training-pill">late_ref: <strong id="fv-late-ref">--</strong></span>
+                </div>
+            </div>
+
+            <!-- Kronos 主信号已移除 (2026-06-25) -->
 
             <!-- Bot 配置 -->
             <div class="panel">
@@ -372,6 +549,42 @@
         </div>
     </div>
 
-    <script type="module" src="js/app.js"></script>
+    
+        <style>
+        /* BTC 趋势 panel */
+        .btc-trend-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 4px;
+            margin-top: 8px;
+            padding: 6px 0;
+            border-top: 1px solid rgba(120, 150, 220, 0.15);
+        }
+        .btc-trend-cell {
+            display: flex; flex-direction: column; align-items: center; gap: 2px;
+        }
+        .btc-trend-label {
+            font-size: 10px; color: #7a87a8; text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .btc-trend-val { font-size: 13px; font-weight: 600; }
+        .btc-trend-val.c-green { color: #5fd99a; }
+        .btc-trend-val.c-red { color: #ff7a8e; }
+        .btc-trend-val.c-mute { color: #7a87a8; }
+        .btc-trend-foot {
+            display: flex; justify-content: space-between;
+            margin-top: 6px; font-size: 10px; color: #6f7a9a;
+        }
+        .btc-trend-foot .mono { color: #aab4d4; font-size: 11px; }
+        .btc-sparkline {
+            display: block;
+            width: 100%;
+            height: 40px;
+            margin-top: 6px;
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.02);
+        }
+    </style>
+
+    <script type="module" src="js/app.js?v=20260707c"></script>
 </body>
 </html>

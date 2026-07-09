@@ -20,6 +20,7 @@ logging.basicConfig(
 )
 
 async def main():
+    # 国内环境自动检测本地代理（v2rayN / Clash 等）并 export
     manager = TradingBotManager()
     await manager.start()
 

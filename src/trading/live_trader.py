@@ -97,57 +97,67 @@ class LiveTrader:
         except Exception:
             return 0.0
 
-    def _execute_order(self, token_id: str, price: float, size: float, side: Any, 
-                        tick_size: str = "0.01", neg_risk: bool = False) -> Optional[str]:
-        """内部执行下单逻辑"""
-        log_prefix = "[DRY_RUN] " if self.dry_run else "[LIVE] "
-        action_name = "买入" if side == BUY else "卖出"
-        
-        logger.info(f"{log_prefix}准备{action_name}: {token_id} @ {price:.3f}, 金额: {size} USDC")
-        
-        if self.dry_run:
-            logger.info(f"{log_prefix}已跳过实际下单提交")
-            return f"dry-run-order-{int(time.time())}"
+    def _execute_order(self, token_id: str, price: float, size: float, side: Any,
+                            tick_size: str = "0.01", neg_risk: bool = False) -> Optional[str]:
+            """内部执行下单逻辑
 
-        try:
-            shares = math.ceil(size / price * 100) / 100  # 向上取整，避免金额低于 $1 最小下单额
-            order_args = OrderArgs(
-                token_id=token_id,
-                price=price,
-                size=shares,
-                side=side
-            )
-            
-            from py_clob_client.clob_types import PartialCreateOrderOptions
+            :param size: BUY 时是 USDC 金额，SELL 时是 shares 数量
+            """
+            log_prefix = "[DRY_RUN] " if self.dry_run else "[LIVE] "
+            action_name = "买入" if side == BUY else "卖出"
 
-            resp = self._call_with_auth_refresh(
-                self.client.create_and_post_order,
-                order_args,
-                options=PartialCreateOrderOptions(tick_size=tick_size, neg_risk=neg_risk)
-            )
+            logger.info(f"{log_prefix}准备{action_name}: {token_id} @ {price:.3f}, "
+                         f"{'金额' if side == BUY else '股数'}: {size}")
 
-            if resp and resp.get("success"):
-                order_id = resp.get("orderID")
-                logger.info(f"✅ 下单成功! OrderID: {order_id}")
-                return order_id
-            else:
-                logger.error(f"❌ 下单失败: {resp}")
+            if self.dry_run:
+                logger.info(f"{log_prefix}已跳过实际下单提交")
+                return f"dry-run-order-{int(time.time())}"
+
+            try:
+                if side == BUY:
+                    shares = math.floor(max(size / price, 0.0) * 100) / 100  # size is USDC, convert to shares
+                else:
+                    shares = math.ceil(max(size, 0.0) * 100) / 100  # size is already shares, just round
+                if shares <= 0:
+                    logger.error(f"❌ 下单失败: 计算份额为 0 (price={price}, size={size})")
+                    return None
+                order_args = OrderArgs(
+                    token_id=token_id,
+                    price=price,
+                    size=shares,
+                    side=side
+                )
+
+                from py_clob_client.clob_types import PartialCreateOrderOptions
+
+                resp = self._call_with_auth_refresh(
+                    self.client.create_and_post_order,
+                    order_args,
+                    options=PartialCreateOrderOptions(tick_size=tick_size, neg_risk=neg_risk)
+                )
+
+                if resp and resp.get("success"):
+                    order_id = resp.get("orderID")
+                    logger.info(f"✅ 下单成功! OrderID: {order_id}")
+                    return order_id
+                else:
+                    logger.error(f"❌ 下单失败: {resp}")
+                    return None
+
+            except Exception as e:
+                logger.error(f"❌ 下单异常: {e}")
                 return None
-                
-        except Exception as e:
-            logger.error(f"❌ 下单异常: {e}")
-            return None
 
     def buy(self, token_id: str, price: float, size_usdc: float, 
             tick_size: str = "0.01", neg_risk: bool = False) -> Optional[str]:
         """买入"""
         return self._execute_order(token_id, price, size_usdc, BUY, tick_size, neg_risk)
 
-    def sell(self, token_id: str, price: float, size_shares: float, 
+    def sell(self, token_id: str, price: float, size_shares: float,
              tick_size: str = "0.01", neg_risk: bool = False) -> Optional[str]:
         """卖出 (平仓)"""
-        # 平仓时 size_shares 是代币数量
-        return self._execute_order(token_id, price, size_shares * price, SELL, tick_size, neg_risk)
+        # 平仓时 size_shares 是代币数量，直接传 shares
+        return self._execute_order(token_id, price, size_shares, SELL, tick_size, neg_risk)
 
     def get_balances(self) -> Dict[str, float]:
         """获取余额 (USDC.e)"""

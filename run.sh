@@ -23,10 +23,22 @@ if [ ! -d "$VENV_DIR" ]; then
     python3 -m venv "$VENV_DIR"
 fi
 
-# 3. 安装/更新依赖
-echo "🛠️  正在检查并同步依赖库..."
-"$VENV_DIR/bin/pip" install --upgrade pip
-"$VENV_DIR/bin/pip" install -r "$ROOT_DIR/requirements.txt"
+# 3. 安装/更新依赖（仅 requirements.txt 变更时重装）
+echo "🛠️  正在检查依赖..."
+REQ_FILE="$ROOT_DIR/requirements.txt"
+MARKER_FILE="$VENV_DIR/.installed"
+if [ -f "$REQ_FILE" ]; then
+    if [ -f "$MARKER_FILE" ] && [ "$(cat "$MARKER_FILE" 2>/dev/null)" = "$(cksum "$REQ_FILE" 2>/dev/null | cut -d' ' -f1)" ]; then
+        echo "   ✓ 依赖已安装，跳过安装"
+    else
+        echo "   ↻ 检测到依赖变更，正在安装..."
+        "$VENV_DIR/bin/pip" install --quiet --upgrade pip 2>/dev/null
+        "$VENV_DIR/bin/pip" install --quiet -r "$REQ_FILE"
+        # 缓存当前 requirements.txt 的 hash
+        cksum "$REQ_FILE" 2>/dev/null | cut -d' ' -f1 > "$MARKER_FILE"
+        echo "   ✓ 依赖安装完成"
+    fi
+fi
 
 # 4. 配置文件校验
 if [ ! -f "$ROOT_DIR/.env" ]; then

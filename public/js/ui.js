@@ -1,8 +1,8 @@
 /* ========= ui.js: 界面渲染与交互逻辑 ========= */
-import { dashboardState, getActiveAccountMode } from './state.js';
+import { dashboardState, getActiveAccountMode, getActiveSystemView } from './state.js';
 import { 
     setText, escapeHtml, formatUSD, formatSignedUSD, 
-    shortTime, shortMinute, firstValue, firstNumber,
+    shortTime, shortMinute, dateTime, firstValue, firstNumber,
     extractPnlFromText
 } from './utils.js';
 
@@ -33,6 +33,7 @@ export function renderAccountMode() {
     const paperCard = document.getElementById('paper-balance-card');
     const assetCard = document.getElementById('asset-change-card');
     const realCard = document.getElementById('real-balance-card');
+    const systemSwitch = document.getElementById('system-view-switch');
 
     if (paperBtn) paperBtn.classList.toggle('active', !isReal);
     if (realBtn) realBtn.classList.toggle('active', isReal);
@@ -50,6 +51,9 @@ export function renderAccountMode() {
     if (metricsRow) {
         metricsRow.style.setProperty('--metric-columns', isReal ? '3' : '4');
     }
+    if (systemSwitch) {
+        systemSwitch.style.display = isReal ? 'none' : 'inline-flex';
+    }
 
     if (badge) {
         badge.textContent = isReal ? '真实账户视图' : '模拟账户视图';
@@ -58,7 +62,7 @@ export function renderAccountMode() {
     if (caption) {
         caption.textContent = isReal
             ? '真实账户视图展示真实余额与公开持仓；是否真正下单取决于顶部运行开关。'
-            : '模拟账户视图展示本地 100U 纸上交易记录与持仓。';
+            : '模拟账户视图展示本地 500U 纸上交易记录与持仓。';
     }
 
     setText('trade-panel-title', isReal ? '最近真实成交' : '全部模拟交易流水');
@@ -79,6 +83,75 @@ export function renderAccountMode() {
 }
 window.renderAccountMode = renderAccountMode;
 
+function currentInstanceData() {
+    return dashboardState.instances[getActiveSystemView()] || null;
+}
+
+function primaryInstanceData() {
+    return dashboardState.instances.primary || null;
+}
+
+function parallelInstanceData() {
+    return dashboardState.instances.parallel || null;
+}
+
+export function renderSystemTabs() {
+    const isReal = getActiveAccountMode() === 'real';
+    const primaryBtn = document.getElementById('switch-primary-system');
+    const parallelBtn = document.getElementById('switch-parallel-system');
+    const badge = document.getElementById('system-view-badge');
+    const active = getActiveSystemView();
+    if (primaryBtn) primaryBtn.classList.toggle('active', !isReal && active === 'primary');
+    if (parallelBtn) parallelBtn.classList.toggle('active', !isReal && active === 'parallel');
+    if (badge) {
+        badge.textContent = isReal
+            ? '真实账户'
+            : (active === 'parallel' ? '5m 对冲系统' : '15m 主系统');
+    }
+}
+window.renderSystemTabs = renderSystemTabs;
+
+export function renderSystemsOverview() {
+    const set = (id, value, cls = '') => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = value;
+        el.className = cls ? `perf-val mono ${cls}` : 'perf-val mono';
+    };
+    const primary = primaryInstanceData();
+    const parallel = parallelInstanceData();
+    const primaryBalance = firstNumber(primary?.balance?.balance, 0) || 0;
+    const parallelBalance = firstNumber(parallel?.balance?.balance, 0) || 0;
+    const totalBalance = primaryBalance + parallelBalance;
+    const primaryOpen = Array.isArray(primary?.positions) ? primary.positions.length : 0;
+    const parallelOpen = Array.isArray(parallel?.positions) ? parallel.positions.length : 0;
+    const primaryPnl = firstNumber(primary?.balance?.realized_pnl, primary?.config?.paper_profit, 0) || 0;
+    const parallelPnl = firstNumber(parallel?.balance?.realized_pnl, parallel?.config?.paper_profit, 0) || 0;
+
+    set('systems-total-balance', formatUSD(totalBalance), totalBalance > 0 ? 'c-green' : '');
+    set('systems-total-open', String(primaryOpen + parallelOpen));
+    set('systems-primary-pnl', formatSignedUSD(primaryPnl), primaryPnl > 0 ? 'c-green' : primaryPnl < 0 ? 'c-red' : 'c-amber');
+    set('systems-parallel-pnl', formatSignedUSD(parallelPnl), parallelPnl > 0 ? 'c-green' : parallelPnl < 0 ? 'c-red' : 'c-amber');
+
+    const pStatus = primary?.status || {};
+    const sStatus = parallel?.status || {};
+    set('parallel-running', pStatus.running ? 'RUNNING' : '--', pStatus.running ? 'c-green' : '');
+    set('parallel-mode', primary ? formatUSD(primaryBalance) : '--');
+    set('parallel-market', `${primaryOpen} 仓`);
+    set('parallel-summary', firstValue(pStatus.execution_summary, pStatus.market_error, '--'));
+
+    set('secondary-running', sStatus.running ? 'RUNNING' : '--', sStatus.running ? 'c-green' : '');
+    set('secondary-mode', parallel ? formatUSD(parallelBalance) : '--');
+    set('secondary-market', `${parallelOpen} 仓`);
+    set('secondary-summary', firstValue(sStatus.execution_summary, sStatus.market_error, '--'));
+
+    const badge = document.getElementById('parallel-badge');
+    if (badge) {
+        badge.textContent = parallel?.status?.running ? '双系统在线' : '主系统在线';
+    }
+}
+window.renderSystemsOverview = renderSystemsOverview;
+
 export function renderPaperPerformance() {
     const card = document.getElementById('asset-change-card');
     const valueEl = document.getElementById('asset-change-value');
@@ -87,8 +160,15 @@ export function renderPaperPerformance() {
 
     const cfg = dashboardState.config || {};
     const paperSummary = dashboardState.paperBalance || {};
-    const startBalance = firstNumber(cfg.paper_start_balance, 100);
+    const startBalance = firstNumber(cfg.paper_start_balance, 500);
     const endingBalance = firstNumber(cfg.paper_balance, paperSummary.balance);
+    // 同步模拟账户权益卡片
+    const balanceEl = document.getElementById('usdc-balance');
+    const statusEl = document.getElementById('balance-status');
+    if (balanceEl && endingBalance != null) {
+        balanceEl.textContent = formatUSD(endingBalance);
+        if (statusEl) statusEl.textContent = '可用余额';
+    }
     let pnl = firstNumber(cfg.paper_profit);
     if (pnl == null && startBalance != null && endingBalance != null) {
         pnl = endingBalance - startBalance;
@@ -187,10 +267,11 @@ export function renderConfig() {
         : firstNumber(cfg.reserved_balance, paperSummary.reserved_balance);
     const openPositions = dashboardState.positionCounts[getActiveAccountMode()];
     const viewLabel = isReal ? '真实账户视图' : '模拟账户视图';
-    const isAutoBtcPreset = (cfg.market_selection_mode || 'manual') === 'auto_btc_15m';
+    const marketMode = cfg.market_selection_mode || 'manual';
+    const isAutoBtcPreset = marketMode === 'auto_btc_15m' || marketMode === 'auto_btc_5m';
     const marketQuestion = firstValue(
         cfg.market_question,
-        isAutoBtcPreset ? 'BTC 15m 滚动盘口' : null,
+        marketMode === 'auto_btc_5m' ? 'BTC 5m 滚动盘口' : isAutoBtcPreset ? 'BTC 15m 滚动盘口' : null,
         cfg.target_market_slug,
         cfg.target_market_url,
         '--'
@@ -200,7 +281,11 @@ export function renderConfig() {
     const outcomeSummary = marketOutcomes.length
         ? marketOutcomes.map(item => `[${item.index}] ${item.label} @ ${item.price ?? '--'}`).join(' | ')
         : '--';
-    const marketModeLabel = isAutoBtcPreset ? 'BTC 15m 预置模式' : '固定目标市场';
+    const marketModeLabel = marketMode === 'auto_btc_5m'
+        ? 'BTC 5m 预置模式'
+        : isAutoBtcPreset
+            ? 'BTC 15m 预置模式'
+            : '固定目标市场';
 
     setText('cfg-mode', cfg.strategy_name ? `${mode} / ${viewLabel}` : `${mode} / ${viewLabel}`);
     setText('cfg-daily-open', marketQuestion);
@@ -334,36 +419,184 @@ window.renderAiHistory = renderAiHistory;
 export function renderTrades(trades) {
     const tbody = document.getElementById('trades-body');
     const mode = getActiveAccountMode();
-    setText('trade-count', trades.length + ' 笔');
+    const sortedTrades = [...(trades || [])].sort((a, b) => {
+        const aTs = Date.parse(firstValue(a.closed_at, a.created_at, a.opened_at, a.timestamp, a.time, '')) || 0;
+        const bTs = Date.parse(firstValue(b.closed_at, b.created_at, b.opened_at, b.timestamp, b.time, '')) || 0;
+        return bTs - aTs;
+    });
+    setText('trade-count', sortedTrades.length + ' 笔');
 
-    if (!trades.length) {
-        tbody.innerHTML = `<tr><td colspan="7" class="empty-row">${mode === 'real' ? '暂无真实成交记录' : '暂无模拟交易记录'}</td></tr>`;
+    // 建立 market_slug → direction 索引 (给 SELL 配对用)
+    // Bug fix 2026-06-27: 原本写 window._buyDirectionMap, 跨调用共享全局状态
+    // 容易 race condition. 实际上只在同一个 renderTrades 函数内部用, 改成局部 const 即可.
+    const buyMap = {};
+    for (const t of sortedTrades) {
+        if (String(t.side || '').toUpperCase().includes('BUY') && t.outcome && t.market_slug) {
+            buyMap[t.market_slug] = String(t.outcome);
+        }
+    }
+
+    if (!sortedTrades.length) {
+        setText('trade-open-count', '0');
+        setText('trade-closed-count', '0');
+        setText('trade-realized-pnl', '$0.00');
+        tbody.innerHTML = `<tr><td colspan="10" class="empty-row">${mode === 'real' ? '暂无真实成交记录' : '暂无模拟交易记录'}</td></tr>`;
         return;
     }
 
-    const rows = trades.map((t) => {
+    let openCount = 0;
+    let closedCount = 0;
+    let realizedPnlSum = 0;
+
+    function tradeExitLabel(trade, rawStatus, strategy, closePrice) {
+        const reason = String(firstValue(trade.reason, trade.note, '') || '');
+        const status = String(rawStatus || '').toUpperCase();
+        const storedCode = String(firstValue(trade.close_reason_code, '') || '').toLowerCase();
+        const storedLabel = String(firstValue(trade.close_reason_label, '') || '');
+        if (storedCode || storedLabel) {
+            const byCode = {
+                take_profit: { short: 'TP', full: '止盈', cls: 'tag-buy' },
+                five_min_stop: { short: '5止', full: '5分钟止损', cls: 'tag-sell' },
+                hard_stop: { short: '硬止', full: '硬止损', cls: 'tag-sell' },
+                late_time_stop: { short: '尾盘', full: '尾盘离场', cls: 'tag-warn' },
+                expiry_settle: { short: '到期', full: '到期结算', cls: 'tag-warn' },
+                hedge_early_exit: { short: '提离', full: '提前离场', cls: 'tag-warn' },
+                hedge_half_exit: { short: '半程', full: '半程离场', cls: 'tag-warn' },
+                hedge_settle: { short: '结算', full: '到期结算', cls: 'tag-ok' },
+            };
+            if (storedCode && byCode[storedCode]) return byCode[storedCode];
+            if (storedLabel) {
+                const short = storedLabel.length <= 4 ? storedLabel : storedLabel.slice(0, 4);
+                return { short, full: storedLabel, cls: 'tag-warn' };
+            }
+        }
+        if (status.includes('TAKE_PROFIT') || status.includes('TP')) {
+            return { short: 'TP', full: '止盈', cls: 'tag-buy' };
+        }
+        if (status.includes('STOP_LOSS')) {
+            return { short: 'SL', full: '止损', cls: 'tag-sell' };
+        }
+        if (status.includes('EXPIRY')) {
+            return { short: '到期', full: '到期结算', cls: 'tag-warn' };
+        }
+        if (status.includes('TIME_STOP')) {
+            if (strategy === 'Hedge' || reason.includes('[Hedge]')) {
+                return { short: '半程', full: '半程离场', cls: 'tag-warn' };
+            }
+            if (closePrice === 0 || closePrice === 1) {
+                return { short: '到期', full: '到期结算', cls: 'tag-warn' };
+            }
+            return { short: '时离', full: '时间离场', cls: 'tag-warn' };
+        }
+        return { short: '已平', full: '已平仓', cls: 'tag-ok' };
+    }
+
+    const rows = sortedTrades.map((t) => {
         const side = String(firstValue(t.side, t.type, '') || '').toUpperCase();
         const outcome = String(firstValue(t.outcome, t.outcome_name, t.label, '') || '').toUpperCase();
-        const decisionId = firstValue(t.ai_decision_id, t.decision_id, '');
-        const sideText = side.includes('BUY')
-            ? ('买入 ' + (outcome || ''))
-            : side.includes('SELL')
-                ? ('卖出 ' + (outcome || ''))
-                : (outcome || side || '--');
-        const sideTag = `<span class="tag ${side.includes('BUY') ? 'tag-buy' : side.includes('SELL') ? 'tag-sell' : 'tag-ok'}">${sideText.trim()}</span>`;
-
         const rawStatus = String(firstValue(t.status, t.tradeStatus, t.state, '') || '').toUpperCase();
-        const isOpenAction = side.includes('BUY') || rawStatus.includes('OPEN');
-        const operationTag = `<span class="tag ${isOpenAction ? 'tag-buy' : 'tag-sell'}">${isOpenAction ? '开仓' : '平仓'}</span>`;
+        // Bug fix 2026-06-25: 用 status 判定开/平仓, 不要用 side
+        // 老逻辑 `side.includes('BUY') || rawStatus.includes('OPEN')` 在低买策略
+        // 错了: lowbuy 一次写一条 BUY trade, status 变成 TP/TIME_STOP 表示已平仓,
+        // 但 side 还是 BUY → 前端误判成"持仓中" → realized_pnl 不显示.
+        const STATUS_OPEN_RE = /\b(OPEN|PENDING|PARTIAL)\b/;
+        const isOpenAction = STATUS_OPEN_RE.test(rawStatus) && side.includes('BUY');
+        const reasonOrStatus = firstValue(t.reason, t.status, t.note, '');
 
-        const time = shortTime(firstValue(t.created_at, t.timestamp, t.match_time, t.time));
-        const amountRaw = firstValue(t.amount_display, t.size_display, t.size, t.amount, t.quantity, t.lastSize);
-        const amount = amountRaw == null ? '--' : String(amountRaw);
+        // --- 方向 (Up/Down) ---
+        // BUY: outcome 字段有值; SELL: outcome=null, 配对同 slug 的 BUY
+        let direction = firstValue(t.outcome, t.outcome_name, t.outcome_label, t.label, '');
+        if (!direction && !isOpenAction) {
+            // 用 market_slug 配对 BUY 交易
+            const sellSlug = t.market_slug || '';
+            // Bug fix 2026-06-27: 读 buyMap (局部 const) 而非 window._buyDirectionMap (已删)
+            if (sellSlug && buyMap[sellSlug]) {
+                direction = buyMap[sellSlug];
+            }
+        }
+        const dirArrow = direction === 'Up' || direction === 'UP' ? '↑' :
+                         direction === 'Down' || direction === 'DOWN' ? '↓' : '';
+        const dirColor = direction === 'Up' || direction === 'UP' ? 'c-green' :
+                         direction === 'Down' || direction === 'DOWN' ? 'c-red' : '';
+
+        // --- 策略识别 ---
+        let strategy = '--';
+        if (reasonOrStatus.includes('LowBuy')) strategy = 'LowBuy';
+        else if (reasonOrStatus.includes('Hedge')) strategy = 'Hedge';
+        else if (reasonOrStatus.includes('反转') || reasonOrStatus.includes('reversal')) strategy = '反转';
+        else if (reasonOrStatus.includes('AI')) strategy = 'AI';
+        if (strategy === '--' && String(t.strategy || '').includes('hedged_limit')) strategy = 'Hedge';
+        // 从 status 字段识别
+        if (strategy === '--') {
+            const s = String(rawStatus).toUpperCase();
+            if (s.includes('TAKE_PROFIT') || s.includes('TP') || s.includes('EXPIRY') || s.includes('TIME_STOP') || s.includes('STOP_LOSS')) {
+                strategy = 'LowBuy';
+            }
+        }
+
+        let strategyTag = strategy;
+        if (strategy === 'LowBuy') {
+            strategyTag = `<span class="tag tag-ok">LB</span>`;
+        }
+        else if (strategy === 'Hedge') strategyTag = `<span class="tag tag-buy">Hedge</span>`;
+        else if (strategy === '反转') strategyTag = `<span class="tag tag-buy">反转</span>`;
+        else if (strategy === 'AI') strategyTag = `<span class="tag tag-ok">AI</span>`;
+        else strategyTag = `<span class="tag tag-ok">${strategy}</span>`;
+
+        const timeValue = firstValue(t.created_at, t.timestamp, t.match_time, t.time);
+        const time = dateTime(timeValue);
+
+        // --- 份数 (shares) ---
+        const sharesRaw = firstValue(t.size_display, t.size, t.amount, t.quantity, 0);
+        const shares = sharesRaw == null ? '--' : Number(sharesRaw).toFixed(2);
+
+        // --- 入场价 ---
+        let entryPrice = null;
+        let exitPrice = null;
         const price = firstNumber(t.price, t.avgPrice, t.avg_price, t.executionPrice);
-        const market = firstValue(t.market, t.question, t.title, t.name, '--');
-        const note = firstValue(t.note, t.description, t.reason, '');
-        const realizedPnl = firstNumber(t.realized_profit, t.realizedPnl, t.pnl, t.profit, extractPnlFromText(note));
+        const realizedPnl = firstNumber(t.realized_profit, t.realizedPnl, t.pnl, t.profit, extractPnlFromText(reasonOrStatus));
 
+        if (isOpenAction) {
+            // BUY/OPEN: price = entry price
+            entryPrice = price;
+        } else {
+            // CLOSED trade: t.price = entry, t.close_price = exit
+            // close_price=0 是有效值 (到期归零/全损), 不能 >0 过滤
+            const closePrice = firstNumber(t.close_price, t.closePrice);
+            if (closePrice !== null && closePrice !== undefined && !isNaN(closePrice)) {
+                exitPrice = closePrice;
+            } else if (price != null && price > 0) {
+                exitPrice = price;
+            }
+        }
+        // entry: t.price 始终是入场价 (不分 side)
+        if (price != null && price > 0) {
+            entryPrice = price;
+        } else if (realizedPnl != null && sharesRaw > 0) {
+            const proceeds = firstNumber(t.amount, 0);
+            if (proceeds > 0) {
+                const stake = proceeds - realizedPnl;
+                if (stake > 0 && sharesRaw > 0) {
+                    entryPrice = stake / sharesRaw;
+                }
+            }
+        }
+        // 过滤: 隐藏 executor 生成的 SELL 记录 (side=SELL, outcome=null)
+        // 它们跟 BUY 记录重复, 双重计算 PnL.
+        if (t.side === 'SELL' && !t.outcome && !isOpenAction) {
+            return '';
+        }
+
+        if (isOpenAction) openCount += 1;
+        else closedCount += 1;
+        if (!isOpenAction && realizedPnl != null) realizedPnlSum += realizedPnl;
+
+        const entryStr = entryPrice != null ? entryPrice.toFixed(4) : (isOpenAction ? '--' : '--');
+        const exitStr = exitPrice != null ? exitPrice.toFixed(4) : (isOpenAction ? '--' : '--');
+
+        const exitLabel = tradeExitLabel(t, rawStatus, strategy, exitPrice);
+
+        // --- 结果 ---
         let resultTag = '<span class="tag tag-ok">进行中</span>';
         let resultValue = '<span class="trade-result-value mono">--</span>';
         if (!isOpenAction && realizedPnl != null) {
@@ -372,23 +605,41 @@ export function renderTrades(trades) {
             else resultTag = '<span class="tag tag-ok">保本</span>';
             resultValue = `<span class="trade-result-value mono ${realizedPnl > 0 ? 'c-green' : realizedPnl < 0 ? 'c-red' : 'c-amber'}">${formatSignedUSD(realizedPnl)}</span>`;
         } else if (!isOpenAction) {
-            if (rawStatus.includes('TAKE_PROFIT')) {
-                resultTag = '<span class="tag tag-buy">止盈</span>';
-            } else if (rawStatus.includes('STOP_LOSS')) {
-                resultTag = '<span class="tag tag-sell">止损</span>';
-            } else if (rawStatus.includes('TIME_EXIT') || rawStatus.includes('RESOLUTION')) {
-                resultTag = '<span class="tag tag-ok">离场</span>';
-            } else {
-                resultTag = '<span class="tag tag-ok">已平仓</span>';
-            }
+            resultTag = `<span class="tag ${exitLabel.cls}">${exitLabel.full}</span>`;
         }
 
-        const noteId = `trade-note-${escapeHtml(String(firstValue(t.id, time, Math.random())).replace(/[^a-zA-Z0-9_-]/g, '-'))}`;
+        let statusTag = '<span class="tag tag-neutral">持仓中</span>';
+        if (!isOpenAction) {
+            statusTag = `<span class="tag ${exitLabel.cls}">${exitLabel.short}</span>`;
+        }
+
+        const directionTag = direction
+            ? `<span class="trade-direction ${dirColor}">${dirArrow || ''}<span>${escapeHtml(direction)}</span></span>`
+            : '<span class="trade-direction is-empty">--</span>';
+
+        // --- 说明 ---
+        const note = firstValue(t.note, t.description, t.reason, '');
+        const decisionId = firstValue(t.ai_decision_id, t.decision_id, '');
+        const market = firstValue(t.market, t.question, t.title, t.name, '--');
+        const instanceLabel = firstValue(t.instance_label, '');
+        // Bug fix 2026-06-27: 用 stable hash 而不是 Math.random, 否则 trade 没 id 时
+        // 每次 render 都用新 ID, <details> 展开状态丢失. stable hash 从 market_slug + outcome
+        // + created_at 派生, 同一笔 trade 每次 render 都得到同一 ID.
+        const stableId = String(firstValue(t.id, '')) ||
+            [t.market_slug || '', t.outcome || '', t.created_at || ''].join('|');
+        const noteId = `trade-note-${escapeHtml(stableId).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
         const detailParts = [];
+        const pairId = firstValue(t.pair_id, t.hedge_pair_id, '');
         if (decisionId) {
             detailParts.push(`<div class="trade-decision-link"><span class="tag tag-ok">${escapeHtml(decisionId)}</span><span>对应的 AI 决策记录</span></div>`);
         }
-        detailParts.push(`<div class="trade-market">${escapeHtml(market)}</div>`);
+        const marketHtml = `<div class="trade-market" title="${escapeHtml(market)}">${escapeHtml(market)}</div>`;
+        if (instanceLabel) {
+            detailParts.push(`<div class="trade-decision-link"><span class="tag tag-neutral">${escapeHtml(instanceLabel)}</span><span>实例来源</span></div>`);
+        }
+        if (pairId) {
+            detailParts.push(`<div class="trade-decision-link"><span class="tag tag-neutral">${escapeHtml(pairId)}</span><span>对冲对 ID</span></div>`);
+        }
         if (note) {
             detailParts.push(`
                 <details class="trade-note-wrap">
@@ -399,15 +650,26 @@ export function renderTrades(trades) {
         }
 
         return `<tr>
-            <td>${time}</td>
-            <td>${operationTag}</td>
-            <td>${sideTag}</td>
-            <td>${escapeHtml(amount)}</td>
-            <td>${price != null ? price.toFixed(4) : '--'}</td>
+            <td class="mono" title="${escapeHtml(timeValue || '')}">${escapeHtml(time)}</td>
+            <td>${strategyTag}</td>
+            <td>${directionTag}</td>
+            <td>${statusTag}</td>
+            <td>${escapeHtml(shares)}</td>
+            <td>${entryStr}</td>
+            <td>${exitStr}</td>
             <td><div class="trade-result">${resultTag}${resultValue}</div></td>
+            <td>${marketHtml}</td>
             <td><div class="trade-detail trade-detail-compact">${detailParts.join('')}</div></td>
         </tr>`;
     }).join('');
+
+    setText('trade-open-count', String(openCount));
+    setText('trade-closed-count', String(closedCount));
+    const pnlLabel = document.getElementById('trade-realized-pnl');
+    if (pnlLabel) {
+        pnlLabel.textContent = formatSignedUSD(realizedPnlSum);
+        pnlLabel.className = `mono ${realizedPnlSum > 0 ? 'c-green' : realizedPnlSum < 0 ? 'c-red' : 'c-amber'}`;
+    }
 
     tbody.innerHTML = rows;
 }
@@ -517,6 +779,117 @@ export function renderPositions(positions) {
 }
 window.renderPositions = renderPositions;
 
+export function renderHedgePairs(pairs, instanceLabel = '') {
+    const panel = document.getElementById('hedge-pairs-panel');
+    const list = document.getElementById('hedge-pairs-list');
+    const countLabel = document.getElementById('hedge-pairs-count');
+    const title = document.getElementById('hedge-pairs-title');
+    const caption = document.getElementById('hedge-pairs-caption');
+    if (!panel || !list || !countLabel || !title || !caption) return;
+
+    const isParallelView = getActiveAccountMode() === 'paper' && getActiveSystemView() === 'parallel';
+    panel.style.display = isParallelView ? 'block' : 'none';
+    if (!isParallelView) return;
+
+    const data = Array.isArray(pairs) ? pairs : [];
+    title.textContent = `${instanceLabel || '5m 对冲系统'} 对冲对状态`;
+    caption.textContent = '单独显示 5m 单腿先行策略的两条腿状态，区分首腿挂单、待补腿、已成交、离场和结算。';
+    countLabel.textContent = `${data.length} 组`;
+
+    if (!data.length) {
+        list.innerHTML = '<div class="empty-row">当前没有对冲对记录</div>';
+        return;
+    }
+
+    const tagClass = (status) => {
+        const key = String(status || '').toUpperCase();
+        if (['FILLED', 'SETTLED_LEG', 'SETTLED'].includes(key)) return 'tag-buy';
+        if (['CANCELLED', 'EXITED_SINGLE'].includes(key)) return 'tag-warn';
+        if (['PARTIAL', 'LEG_OPEN', 'LOCKED', 'PENDING_BOTH'].includes(key)) return 'tag-ok';
+        return 'tag-neutral';
+    };
+
+    list.innerHTML = data.map((pair) => {
+        const market = escapeHtml(firstValue(pair.market_title, pair.market_slug, '--'));
+        const pairStatus = escapeHtml(firstValue(pair.status_label, pair.status, '--'));
+        const entrySide = escapeHtml(firstValue(pair.entry_side_label, '--'));
+        const pairId = escapeHtml(firstValue(pair.id, '--'));
+        const realized = firstNumber(pair.realized_profit);
+        const locked = firstNumber(pair.locked_profit);
+        const firstLegPrice = firstNumber(pair.first_leg_price);
+        const hedgeLimit = firstNumber(pair.hedge_limit_price);
+        const hedgeBestAsk = firstNumber(pair.hedge_best_ask);
+        const hedgeGap = firstNumber(pair.hedge_gap_to_fill);
+        const cancelReason = escapeHtml(firstValue(pair.cancel_reason, ''));
+        const canHedgeNow = pair.can_hedge_now === true;
+        const pnlValue = realized != null ? realized : locked;
+        const pnlText = pnlValue != null ? formatSignedUSD(pnlValue) : '--';
+        const pnlClass = pnlValue == null ? '' : (pnlValue > 0 ? 'c-green' : pnlValue < 0 ? 'c-red' : 'c-amber');
+        const ordersHtml = (pair.orders || []).map((order) => {
+            const outcome = escapeHtml(firstValue(order.outcome, `腿 ${order.outcome_index}`, '--'));
+            const target = firstNumber(order.target_shares, 0) || 0;
+            const filled = firstNumber(order.filled_shares, 0) || 0;
+            const limit = firstNumber(order.limit_price);
+            const avg = firstNumber(order.avg_price);
+            const currentAsk = firstNumber(order.current_best_ask);
+            const currentBid = firstNumber(order.current_best_bid);
+            const legStatus = escapeHtml(firstValue(order.status_label, order.status, '--'));
+            const legCancel = escapeHtml(firstValue(order.cancel_reason, ''));
+            return `
+                <div class="hedge-leg-row">
+                    <div class="hedge-leg-top">
+                        <div class="hedge-leg-main">
+                            <span class="tag ${tagClass(order.status)}">${legStatus}</span>
+                            <strong>${outcome}</strong>
+                        </div>
+                        <div class="hedge-leg-meta mono">
+                            <span>${filled.toFixed(2)} / ${target.toFixed(2)} 份</span>
+                            <span>挂 ${limit != null ? limit.toFixed(4) : '--'}</span>
+                            <span>均 ${avg != null ? avg.toFixed(4) : '--'}</span>
+                            <span>bid ${currentBid != null ? currentBid.toFixed(4) : '--'}</span>
+                            <span>ask ${currentAsk != null ? currentAsk.toFixed(4) : '--'}</span>
+                        </div>
+                    </div>
+                    ${legCancel ? `<div class="hedge-pair-sub">${legCancel}</div>` : ''}
+                </div>
+            `;
+        }).join('');
+        const diagnostics = [];
+        diagnostics.push(`<div class="position-stat"><span>对冲对 ID</span><strong class="mono">${pairId}</strong></div>`);
+        diagnostics.push(`<div class="position-stat"><span>首腿成交</span><strong class="mono">${firstLegPrice != null ? firstLegPrice.toFixed(4) : '--'}</strong></div>`);
+        diagnostics.push(`<div class="position-stat"><span>补腿上限</span><strong class="mono">${hedgeLimit != null ? hedgeLimit.toFixed(4) : '--'}</strong></div>`);
+        diagnostics.push(`<div class="position-stat"><span>对侧 ask</span><strong class="mono">${hedgeBestAsk != null ? hedgeBestAsk.toFixed(4) : '--'}</strong></div>`);
+        diagnostics.push(`<div class="position-stat"><span>距可补差值</span><strong class="mono ${hedgeGap != null ? (hedgeGap <= 0 ? 'c-green' : 'c-red') : ''}">${hedgeGap != null ? (hedgeGap > 0 ? '+' : '') + hedgeGap.toFixed(4) : '--'}</strong></div>`);
+        diagnostics.push(`<div class="position-stat"><span>当前可补</span><strong class="mono ${canHedgeNow ? 'c-green' : 'c-amber'}">${hedgeGap != null ? (canHedgeNow ? '可补' : '不可补') : '--'}</strong></div>`);
+        if (cancelReason) {
+            diagnostics.push(`<div class="position-stat position-stat-wide"><span>取消原因</span><strong>${cancelReason}</strong></div>`);
+        }
+
+        return `
+            <div class="hedge-pair-card">
+                <div class="hedge-pair-head">
+                    <div class="hedge-pair-title-wrap">
+                        <div class="hedge-pair-title">${market}</div>
+                        <div class="hedge-pair-sub mono">${escapeHtml(firstValue(pair.market_slug, '--'))}</div>
+                        <div class="hedge-pair-sub">首腿方向: ${entrySide}</div>
+                    </div>
+                    <div class="hedge-pair-side">
+                        <span class="tag ${tagClass(pair.status)}">${pairStatus}</span>
+                        <span class="hedge-pair-pnl mono ${pnlClass}">${pnlText}</span>
+                    </div>
+                </div>
+                <div class="hedge-legs-grid">${ordersHtml}</div>
+                <div class="position-stat-grid">${diagnostics.join('')}</div>
+            </div>
+        `;
+    }).join('');
+}
+window.renderHedgePairs = renderHedgePairs;
+
+// 套利对子已移除 (2026-06-25)
+function renderArbPairs(_data) { /* no-op */ }
+window.renderArbPairs = renderArbPairs;
+
 export function renderCapitalPanel(data) {
     const isReal = getActiveAccountMode() === 'real';
 
@@ -549,13 +922,21 @@ export function renderCapitalPanel(data) {
             roi = totalInvested > 0 ? (totalProfit / totalInvested) * 100 : 0;
         }
     } else {
-        cashVal = firstNumber(data && data.cash_balance, dashboardState.config && dashboardState.config.cash_balance, 0);
-        reservedVal = firstNumber(data && data.reserved_balance, dashboardState.config && dashboardState.config.reserved_balance, 0);
+        // ── 从 paperBalance API 读取(比 status 更准确) ──
+        const pb = dashboardState.paperBalance || {};
+        cashVal = pb.cash_balance != null ? Number(pb.cash_balance)
+                : firstNumber(data && data.cash_balance, dashboardState.config && dashboardState.config.cash_balance, 0);
+        reservedVal = pb.reserved_balance != null ? Number(pb.reserved_balance)
+                    : firstNumber(data && data.reserved_balance, dashboardState.config && dashboardState.config.reserved_balance, 0);
         const cfg = dashboardState.config || {};
+        // 优先用 pb 的 realized_pnl, 其次用 cfg
+        const paperProfit = pb.realized_pnl != null ? Number(pb.realized_pnl)
+                         : firstNumber(cfg.paper_profit);
+        // 交易数/胜率/ROI 从 cfg 走
         tradeCount = cfg.total_trades;
         winRate = cfg.paper_win_rate;
         roi = cfg.paper_roi_percent;
-        totalProfit = cfg.paper_profit;
+        totalProfit = paperProfit != null ? paperProfit : cfg.paper_profit;
     }
 
     // ── 渲染余额和进度条 ──
@@ -593,7 +974,11 @@ export function renderOrderBook(data) {
     if (!container) return;
 
     if (!data || !Array.isArray(data.outcomes) || data.outcomes.length === 0) {
-        const message = data && data.error ? escapeHtml(String(data.error)) : '暂无深度数据（等待市场数据）';
+        const message = data && data.closed
+            ? '⏸️ ' + (data.message || '盘口已关闭，等待下一窗口')
+            : data && data.error
+                ? escapeHtml(String(data.error))
+                : '暂无深度数据（等待市场数据）';
         container.innerHTML = `<div class="empty-row" style="grid-column:1/-1">${message}</div>`;
         return;
     }
@@ -657,6 +1042,65 @@ export function renderOrderBook(data) {
 }
 window.renderOrderBook = renderOrderBook;
 window.renderCapitalPanel = renderCapitalPanel;
+
+export function renderSystemWorkspace() {
+    renderSystemTabs();
+    renderSystemsOverview();
+    if (getActiveAccountMode() !== 'paper') return;
+
+    const instance = currentInstanceData();
+    if (!instance) return;
+
+    dashboardState.config = instance.config || null;
+    dashboardState.paperBalance = instance.balance || null;
+    dashboardState.positionCounts.paper = Array.isArray(instance.positions) ? instance.positions.length : 0;
+
+    const status = instance.status || {};
+    const dot = document.getElementById('status-dot');
+    const label = document.getElementById('status-label');
+    if (dot && label) {
+        dot.className = `status-dot ${status.running ? 'online' : 'offline'}`;
+        label.textContent = status.running
+            ? `${instance.instance_label || ''} · ${dashboardState.tradingEnabled ? '交易开启' : '交易关闭'}`
+            : `${instance.instance_label || ''} · 离线`;
+    }
+    setText('update-time', status.last_update ? shortTime(status.last_update) : '--');
+    setText('ai-prediction', String(status.ai_action || status.ai_prediction || 'SKIP').toUpperCase() === 'BUY'
+        ? `买 ${status.ai_outcome_label || ''}`.trim()
+        : 'AI 观望');
+    setText('ai-label', firstValue(status.market_question, status.market_error, '等待目标市场'));
+    setText('trade-panel-title', `${instance.instance_label || '当前系统'} 交易流水`);
+    setText('trade-panel-caption', '本金、持仓与交易流水均按当前实例独立显示，不与另一套系统混算。');
+    setText('position-panel-title', `${instance.instance_label || '当前系统'} 持仓`);
+    setText('position-panel-caption', '这里只显示当前实例的活动仓位；未成交挂单会在对冲对状态面板里单独展示。');
+
+    renderPaperPerformance();
+    renderConfig();
+    renderCapitalPanel(instance.config || {});
+
+    const taggedTrades = (instance.trades || []).map((item) => ({ ...item, instance_label: instance.instance_label }));
+    const taggedPositions = (instance.positions || []).map((item) => ({ ...item, instance_label: instance.instance_label }));
+    renderTrades(taggedTrades);
+    renderPositions(taggedPositions);
+    renderHedgePairs(instance.hedge_pairs || [], instance.instance_label || '5m 对冲系统');
+    renderOrderBook(instance.orderbook || {});
+}
+window.renderSystemWorkspace = renderSystemWorkspace;
+
+export function setSystemView(view, shouldRefresh = true) {
+    dashboardState.systemView = view === 'parallel' ? 'parallel' : 'primary';
+    try {
+        window.localStorage.setItem('polymarket_system_view', dashboardState.systemView);
+    } catch (e) {}
+    renderSystemWorkspace();
+    if (shouldRefresh && typeof window.fetchInstanceDashboard === 'function') {
+        Promise.allSettled([
+            window.fetchInstanceDashboard('primary'),
+            window.fetchInstanceDashboard('parallel'),
+        ]);
+    }
+}
+window.setSystemView = setSystemView;
 
 export function initSettings() {
     const settingsModal = document.getElementById('settings-modal');
@@ -744,14 +1188,16 @@ function syncMarketModeUI() {
     if (!modeEl || !marketInput || !marketHint || !marketTag) return;
 
     const mode = modeEl.value || 'manual';
-    const isAutoBtc = mode === 'auto_btc_15m';
+    const isAutoBtc = mode === 'auto_btc_15m' || mode === 'auto_btc_5m';
     marketInput.disabled = isAutoBtc;
     marketInput.placeholder = isAutoBtc
-        ? 'BTC 15m 预置模式无需填写 URL'
+        ? (mode === 'auto_btc_5m' ? 'BTC 5m 预置模式无需填写 URL' : 'BTC 15m 预置模式无需填写 URL')
         : 'https://polymarket.com/event/... 或 market slug';
     marketTag.textContent = isAutoBtc ? '预置' : '手填';
     marketHint.textContent = isAutoBtc
-        ? '系统会自动跟踪当前可交易的 BTC 15m 滚动盘口，无需维护固定链接。'
+        ? (mode === 'auto_btc_5m'
+            ? '系统会自动跟踪当前可交易的 BTC 5m 滚动盘口，无需维护固定链接。'
+            : '系统会自动跟踪当前可交易的 BTC 15m 滚动盘口，无需维护固定链接。')
         : '固定市场适合长期盘口；支持填写 Polymarket URL 或具体 market slug。';
 }
 

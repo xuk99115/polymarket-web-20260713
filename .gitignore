@@ -18,9 +18,10 @@ env/
 !.env.example
 
 # ===== 运行时数据 (data/) =====
-data/bot_status.json
-data/paper_trade_state.json
-data/trading_control.json
+data/.web_token
+data/*.json
+data/*.jsonl
+!data/.gitkeep
 
 # ===== 交易报告 (docs/) =====
 docs/paper_trade_report.md

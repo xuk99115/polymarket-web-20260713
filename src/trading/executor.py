@@ -1,17 +1,30 @@
 import logging
 import math
 import time
+import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List
-from py_clob_client.clob_types import TradeParams
+from typing import Optional, Dict, Any, List, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from py_clob_client.clob_types import TradeParams as _TradeParams
+
+try:
+    from py_clob_client.clob_types import TradeParams
+except ImportError:
+    TradeParams = None  # Paper 模式不需要
+    import logging as _logging
+    _logging.getLogger("executor").warning("py_clob_client 未安装，实盘模式不可用")
 from ..core.config import (
-    Config, PAPER_START_BALANCE, LIVE_BET_AMOUNT, 
-    DRY_RUN, POLYMARKET_PRIVATE_KEY, POLYMARKET_WALLET_ADDRESS,
-    POLYMARKET_API_KEY, POLYMARKET_API_SECRET, POLYMARKET_API_PASSPHRASE,
-    POLYMARKET_FUNDER_ADDRESS, POLYMARKET_SIGNATURE_TYPE
+    Config,
+    POLYMARKET_PRIVATE_KEY,
+    POLYMARKET_API_KEY,
+    POLYMARKET_API_SECRET,
+    POLYMARKET_API_PASSPHRASE,
+    POLYMARKET_FUNDER_ADDRESS,
+    POLYMARKET_SIGNATURE_TYPE,
 )
-from ..core.utils import safe_float, short_wallet
+from ..core.utils import safe_float, short_wallet, first_float
 from .live_trader import LiveTrader
 
 logger = logging.getLogger("trading_executor")
@@ -19,10 +32,15 @@ ACTIVE_ORDER_STATUSES = {"SUBMITTED", "OPEN", "PENDING", "PENDING_FILL", "PARTIA
 EPSILON = 1e-6
 
 
+def _short_id(prefix: str) -> str:
+    """生成全局唯一 ID（避免同秒冲突）。"""
+    return f"{prefix}-{uuid.uuid4().hex[:12]}"
+
+
 def _estimate_limit_shares(price: float, size_usdc: float) -> float:
     if not price or price <= 0:
         return 0.0
-    return math.ceil(size_usdc / price * 100) / 100
+    return _floor_shares(size_usdc / price)
 
 
 def _floor_shares(value: float, decimals: int = 2) -> float:
@@ -63,7 +81,12 @@ class PaperExecutor(BaseExecutor):
 
     async def open_position(self, snapshot, signal, entry_price, outcome, quote) -> str:
         state = self.state_manager.get_state()
-        stake = Config.get_float("PAPER_BET_AMOUNT", "5.0")
+        # 套利/手动 signal 可通过 signal["stake"] 覆盖默认金额
+        signal_stake = safe_float((signal or {}).get("stake"), None)
+        if signal_stake and signal_stake > 0:
+            stake = signal_stake
+        else:
+            stake = Config.get_float("PAPER_BET_AMOUNT", "5.0")
         
         # 资金检查
         if state["cash_balance"] < stake:
@@ -73,7 +96,7 @@ class PaperExecutor(BaseExecutor):
         shares = round(stake / entry_price, 6)
         
         position = {
-            "id": f"paper-{int(time.time())}",
+            "id": _short_id("paper"),
             "market": snapshot.get("slug") or snapshot.get("question"),
             "market_slug": snapshot.get("slug"),
             "market_title": snapshot.get("question"),
@@ -94,7 +117,7 @@ class PaperExecutor(BaseExecutor):
         }
 
         trade = {
-            "id": f"trade-{int(time.time())}",
+            "id": _short_id("trade"),
             "decision_id": signal.get("decision_id") if signal else None,
             "created_at": now_utc.isoformat(),
             "side": "BUY",
@@ -123,10 +146,30 @@ class PaperExecutor(BaseExecutor):
         state = self.state_manager.get_state()
         proceeds = round(position["shares"] * exit_price, 4)
         profit = round(proceeds - position["stake"], 4)
+        now_utc = datetime.now(timezone.utc).isoformat()
         
         state["cash_balance"] = round(state["cash_balance"] + proceeds, 4)
         state["positions"] = [p for p in state["positions"] if p["id"] != position["id"]]
-        
+
+        buy_trade = None
+        for trade in state.get("trades", []):
+            if trade.get("status") == "OPEN" and trade.get("side") == "BUY" and (
+                trade.get("id") == position.get("entry_trade_id")
+                or (
+                    trade.get("market_slug") == position.get("market_slug")
+                    and trade.get("outcome") == position.get("outcome")
+                    and abs((safe_float(trade.get("size"), 0.0) or 0.0) - (safe_float(position.get("shares"), 0.0) or 0.0)) < EPSILON
+                )
+            ):
+                buy_trade = trade
+                break
+
+        if buy_trade:
+            buy_trade["status"] = exit_reason
+            buy_trade["closed_at"] = now_utc
+            buy_trade["close_price"] = exit_price
+            buy_trade["realized_profit"] = profit
+
         # 更新统计数据
         stats = state.setdefault("stats", {"total_trades": 0, "winning_trades": 0, "losing_trades": 0, "total_profit": 0.0})
         stats["total_trades"] += 1
@@ -137,7 +180,7 @@ class PaperExecutor(BaseExecutor):
             stats["losing_trades"] += 1
 
         state.setdefault("trades", []).insert(0, {
-            "id": f"trade-close-{int(time.time())}",
+            "id": _short_id("trade-close"),
             "created_at": datetime.now(timezone.utc).isoformat(),
             "side": "SELL",
             "outcome": position.get("outcome"),
@@ -149,6 +192,7 @@ class PaperExecutor(BaseExecutor):
             "status": exit_reason,
             "reason": exit_reason,
             "realized_profit": profit,
+            "entry_trade_id": position.get("entry_trade_id"),
         })
         
         self.state_manager.save()
@@ -162,10 +206,23 @@ class LiveExecutor(BaseExecutor):
         self._init_client()
 
     def _init_client(self):
+        private_key = Config.get("POLYMARKET_PRIVATE_KEY")
+        funder_address = Config.get("POLYMARKET_FUNDER_ADDRESS")
+        # 关键凭证校验：缺了不允许静默进 dry_run，避免让用户以为在下单
+        missing = []
+        if not private_key:
+            missing.append("POLYMARKET_PRIVATE_KEY")
+        if not funder_address:
+            missing.append("POLYMARKET_FUNDER_ADDRESS")
+        if missing:
+            raise ValueError(
+                "实盘凭证不完整，缺少: " + ", ".join(missing)
+                + "。请在 .env 配置后再切换 TRADING_MODE=live，或在控制台退回 paper 模式。"
+            )
         self.live_trader = LiveTrader(
             host="https://clob.polymarket.com",
-            private_key=Config.get("POLYMARKET_PRIVATE_KEY"),
-            funder_address=Config.get("POLYMARKET_FUNDER_ADDRESS"),
+            private_key=private_key,
+            funder_address=funder_address,
             signature_type=Config.get_int("POLYMARKET_SIGNATURE_TYPE", 1),
             api_creds={
                 "key": Config.get("POLYMARKET_API_KEY"),
@@ -179,7 +236,7 @@ class LiveExecutor(BaseExecutor):
         try:
             res = self.live_trader.get_balances()
             return {"cash": res.get("USDC", 0.0), "reserved": 0.0}
-        except:
+        except Exception:
             return {"cash": 0.0, "reserved": 0.0}
 
     def _find_position(self, state: Dict[str, Any], *, position_id: Optional[str] = None, order: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
@@ -206,7 +263,8 @@ class LiveExecutor(BaseExecutor):
                 continue
             try:
                 ts = int(datetime.fromisoformat(created_at.replace("Z", "+00:00")).timestamp())
-            except Exception:
+            except Exception as exc:
+                logger.debug("_aggregate_fills: 跳过 order %s (created_at=%r 解析失败): %s", order.get("id"), created_at, exc)
                 continue
             oldest_created = ts if oldest_created is None else min(oldest_created, ts)
 
@@ -223,7 +281,7 @@ class LiveExecutor(BaseExecutor):
             })
 
         for trade in trades:
-            match_ts = safe_float(trade.get("match_time"), safe_float(trade.get("last_update")))
+            match_ts = first_float(trade.get("match_time"), trade.get("last_update"))
             taker_order_id = trade.get("taker_order_id")
             if taker_order_id in tracked_ids:
                 size = safe_float(trade.get("size"), 0.0) or 0.0
@@ -238,8 +296,8 @@ class LiveExecutor(BaseExecutor):
                 order_id = maker_order.get("order_id")
                 if order_id not in tracked_ids:
                     continue
-                size = safe_float(maker_order.get("matched_amount"), safe_float(trade.get("size"), 0.0)) or 0.0
-                price = safe_float(maker_order.get("price"), safe_float(trade.get("price"), 0.0)) or 0.0
+                size = first_float(maker_order.get("matched_amount"), trade.get("size"), default=0.0)
+                price = first_float(maker_order.get("price"), trade.get("price"), default=0.0)
                 bucket = _bucket(order_id)
                 bucket["filled_size"] = round(bucket["filled_size"] + size, 8)
                 bucket["filled_value"] = round(bucket["filled_value"] + size * price, 8)
@@ -263,7 +321,7 @@ class LiveExecutor(BaseExecutor):
         realized_profit: Optional[float] = None,
     ):
         trade = {
-            "id": f"live-trade-{order.get('id')}-{int(time.time() * 1000)}",
+            "id": f"live-trade-{order.get('id')}-{uuid.uuid4().hex[:8]}",
             "order_id": order.get("id"),
             "created_at": created_at,
             "side": side,
@@ -283,10 +341,10 @@ class LiveExecutor(BaseExecutor):
     def _reconcile_position_balance(self, position: Dict[str, Any]) -> float:
         token_id = position.get("token_id")
         if not token_id:
-            return safe_float(position.get("shares"), safe_float(position.get("size"), 0.0)) or 0.0
+            return first_float(position.get("shares"), position.get("size"), default=0.0)
 
         available = self.live_trader.get_token_balance(token_id)
-        local_shares = safe_float(position.get("shares"), safe_float(position.get("size"), 0.0)) or 0.0
+        local_shares = first_float(position.get("shares"), position.get("size"), default=0.0)
         if available > EPSILON and local_shares > EPSILON and available + EPSILON < local_shares:
             position["shares"] = round(available, 8)
             position["size"] = position["shares"]
@@ -310,7 +368,7 @@ class LiveExecutor(BaseExecutor):
             position["status"] = "OPEN"
             position.setdefault("opened_at", created_at)
         else:
-            position_id = order.get("position_id") or f"live-pos-{order.get('id')}"
+            position_id = order.get("position_id") or _short_id("live-pos")
             position = {
                 "id": position_id,
                 "entry_order_id": order.get("id"),
@@ -489,8 +547,11 @@ class LiveExecutor(BaseExecutor):
 
     async def open_position(self, snapshot, signal, entry_price, outcome, quote) -> str:
         token_id = quote.get("token_id")
-        stake = Config.get_float("LIVE_BET_AMOUNT", "1.0")
+        signal_stake = safe_float((signal or {}).get("stake"), None)
+        stake = signal_stake if signal_stake and signal_stake > 0 else Config.get_float("LIVE_BET_AMOUNT", "1.0")
         estimated_shares = _estimate_limit_shares(entry_price, stake)
+        if estimated_shares <= EPSILON:
+            return "实盘下单失败: 订单份额过小"
         
         # 调用真正下单
         order_id = self.live_trader.buy(
@@ -535,7 +596,7 @@ class LiveExecutor(BaseExecutor):
         ):
             return f"已有实盘平仓单在途: {position.get('outcome_name') or position.get('outcome')}"
 
-        local_shares = safe_float(position.get("shares"), safe_float(position.get("size"), 0.0)) or 0.0
+        local_shares = first_float(position.get("shares"), position.get("size"), default=0.0)
         if local_shares <= EPSILON:
             return "持仓数量为 0，跳过实盘平仓"
 
