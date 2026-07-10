@@ -872,7 +872,9 @@ class StatusHandler(http.server.SimpleHTTPRequestHandler):
                 api_key = Config.get("POLYGONSCAN_API_KEY", "") or Config.get("ETHERSCAN_API_KEY", "")
                 send_json(self, get_real_wallet_balance(wallet, api_key))
             except Exception as e:
-                send_json(self, {"error": str(e)}, 400)
+                # Keep this endpoint non-fatal for the dashboard and smoke tests:
+                # missing wallet/API config should surface as payload error, not HTTP 400.
+                send_json(self, {"error": str(e)})
 
         # === 交易控制状态 ===
         elif path == "/api/control":

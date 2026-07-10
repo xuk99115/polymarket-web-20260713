@@ -23,6 +23,8 @@ _BTC_CACHE = None
 _BTC_CACHE_TS = 0.0
 _BTC_MIN_FETCH_INTERVAL = 60.0
 _SNAPSHOT_MAX_AGE = 180.0
+_BTC_FETCH_BUDGET_SECS = 4.0
+_BTC_REQUEST_TIMEOUT_SECS = 2.0
 
 
 def _load_snapshot_price(max_age_secs=_SNAPSHOT_MAX_AGE):
@@ -92,16 +94,21 @@ def get_btc_price():
     proxies = [p.strip() for p in proxy_urls.split(",") if p.strip()]
     if not proxies and proxy_url:
         proxies = [proxy_url]
+    started_at = time.time()
 
     headers = {"User-Agent": "Mozilla/5.0"}
 
+    def _remaining_budget():
+        return _BTC_FETCH_BUDGET_SECS - (time.time() - started_at)
+
     def _fetch_via(proxy_url):
         try:
+            timeout = min(_BTC_REQUEST_TIMEOUT_SECS, max(0.5, _remaining_budget()))
             r = requests.get(
                 "https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT",
                 proxies={"http": proxy_url, "https": proxy_url},
                 headers=headers,
-                timeout=8,
+                timeout=timeout,
                 verify=False,  # Binance over SOCKS5: CDN 证书不匹配, 必须跳过
             )
             r.raise_for_status()
@@ -120,6 +127,8 @@ def get_btc_price():
 
     # 先试代理池, 一个成功即可
     for p in proxies:
+        if _remaining_budget() <= 0:
+            break
         result = _fetch_via(p)
         if result:
             _BTC_CACHE = result
@@ -128,10 +137,11 @@ def get_btc_price():
 
     # 全部代理失败, 降级到 CoinGecko (直连)
     try:
+        timeout = min(_BTC_REQUEST_TIMEOUT_SECS, max(0.5, _remaining_budget()))
         r = _direct_get(
             "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true",
             headers=headers,
-            timeout=8,
+            timeout=timeout,
         )
         r.raise_for_status()
         data = r.json()

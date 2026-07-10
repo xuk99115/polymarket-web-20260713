@@ -336,7 +336,10 @@ def get_active_market_slug():
 
 # ---- 链上余额 ----
 
-def fetch_usdc_balance_polygonscan(wallet, api_key="", timeout=10):
+_REAL_BALANCE_TIMEOUT_SECS = 2
+
+
+def fetch_usdc_balance_polygonscan(wallet, api_key="", timeout=_REAL_BALANCE_TIMEOUT_SECS):
     """使用 Polygonscan V2 查询 Polygon 上的 USDC 余额"""
     query = urllib.parse.urlencode({
         "chainid": "137",
@@ -357,7 +360,7 @@ def fetch_usdc_balance_polygonscan(wallet, api_key="", timeout=10):
     raise RuntimeError(result.get("result") or result.get("message") or "余额查询失败")
 
 
-def fetch_usdc_balance_rpc(wallet, timeout=10):
+def fetch_usdc_balance_rpc(wallet, timeout=_REAL_BALANCE_TIMEOUT_SECS):
     """公共 Polygon RPC 兜底查询 USDC 余额"""
     wallet_hex = wallet.lower().replace("0x", "").rjust(64, "0")
     payload = json.dumps({
@@ -387,9 +390,9 @@ def get_real_wallet_balance(wallet, api_key=""):
     if not wallet:
         raise RuntimeError("未配置钱包地址")
     try:
-        balance, source = fetch_usdc_balance_polygonscan(wallet, api_key)
+        balance, source = fetch_usdc_balance_polygonscan(wallet, api_key, timeout=_REAL_BALANCE_TIMEOUT_SECS)
     except Exception:
-        balance, source = fetch_usdc_balance_rpc(wallet)
+        balance, source = fetch_usdc_balance_rpc(wallet, timeout=_REAL_BALANCE_TIMEOUT_SECS)
     return {
         "balance": balance,
         "wallet": wallet,
