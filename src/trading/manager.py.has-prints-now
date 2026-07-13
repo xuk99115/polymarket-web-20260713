@@ -676,7 +676,6 @@ class TradingBotManager:
             "unrealized_pnl": round(unrealized_pnl, 4),
             "total_trades": total_trades,
             "winning_trades": winning_trades,
-            "losing_trades": losing_trades,
             "win_rate": win_rate,
             "session_started_at": state.get("session_started_at"),
         }

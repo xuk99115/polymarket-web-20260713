@@ -260,6 +260,12 @@ class PolymarketClient:
             "neg_risk": bool(raw_market.get("negRisk", neg_risk if neg_risk is not None else False)),
             "tick_size": str(raw_market.get("orderPriceMinTickSize", "0.01")),
             "accepting_orders": raw_market.get("acceptingOrders", True),
+            # 2026-07-11 Bug fix: _resolve_settlement_price 依赖 market["outcomePrices"]
+            # 才能在窗口过期时正确读到 0/1 settlement 价. 之前 _build_outcomes 把
+            # outcomePrices 解析进了 outcomes[].price 但顶层 dict 漏了, 导致
+            # _should_close_position 拿到的 settlement 永远是 0.0 (按 0 兜底),
+            # fv_edge 末段入场永远按全亏结算. 这里从 raw_market 重新解析, 保证类型一致.
+            "outcomePrices": parse_json_list(raw_market.get("outcomePrices")),
         }
 
     def _pick_market_from_event(self, event: Dict[str, Any], slug_hint: str) -> Optional[Dict[str, Any]]:

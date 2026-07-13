@@ -1,0 +1,418 @@
+{
+  "mode": "paper_live",
+  "generated_at": "2026-07-10T08:29:09.718242+00:00",
+  "session_started_at": "2026-07-10T08:29:09.718242+00:00",
+  "cash_balance": 100.0,
+  "positions": [],
+  "orders": [],
+  "trades": [],
+  "closed_markets": [],
+  "ai_history": [
+    {
+      "decision_id": "LOCAL-20260710-102856",
+      "generated_at": "2026-07-10T10:28:56.849709+00:00",
+      "action": "SKIP",
+      "decision": "SKIP",
+      "prediction": "SKIP",
+      "confidence": 0.0,
+      "model": "gpt-4o-mini",
+      "reasoning": "反转策略已关闭",
+      "thought_markdown": "反转策略已关闭",
+      "key_factors": [
+        "市场: Bitcoin Up or Down - July 10, 6:30AM-6:45AM ET",
+        "选择结果: --",
+        "盘口: [0] Up @ 0.505 | [1] Down @ 0.495"
+      ],
+      "risk_flags": [],
+      "execution_summary": "AI 选择观望",
+      "focus_market": "Bitcoin Up or Down - July 10, 6:30AM-6:45AM ET"
+    },
+    {
+      "decision_id": "LOCAL-20260710-102848",
+      "generated_at": "2026-07-10T10:28:48.322034+00:00",
+      "action": "SKIP",
+      "decision": "SKIP",
+      "prediction": "SKIP",
+      "confidence": 0.0,
+      "model": "gpt-4o-mini",
+      "reasoning": "反转策略已关闭",
+      "thought_markdown": "反转策略已关闭",
+      "key_factors": [
+        "市场: Bitcoin Up or Down - July 10, 6:30AM-6:45AM ET",
+        "选择结果: --",
+        "盘口: [0] Up @ 0.505 | [1] Down @ 0.495"
+      ],
+      "risk_flags": [],
+      "execution_summary": "AI 选择观望",
+      "focus_market": "Bitcoin Up or Down - July 10, 6:30AM-6:45AM ET"
+    },
+    {
+      "decision_id": "LOCAL-20260710-102839",
+      "generated_at": "2026-07-10T10:28:39.503895+00:00",
+      "action": "SKIP",
+      "decision": "SKIP",
+      "prediction": "SKIP",
+      "confidence": 0.0,
+      "model": "gpt-4o-mini",
+      "reasoning": "反转策略已关闭",
+      "thought_markdown": "反转策略已关闭",
+      "key_factors": [
+        "市场: Bitcoin Up or Down - July 10, 6:30AM-6:45AM ET",
+        "选择结果: --",
+        "盘口: [0] Up @ 0.505 | [1] Down @ 0.495"
+      ],
+      "risk_flags": [],
+      "execution_summary": "AI 选择观望",
+      "focus_market": "Bitcoin Up or Down - July 10, 6:30AM-6:45AM ET"
+    },
+    {
+      "decision_id": "LOCAL-20260710-102830",
+      "generated_at": "2026-07-10T10:28:30.821782+00:00",
+      "action": "SKIP",
+      "decision": "SKIP",
+      "prediction": "SKIP",
+      "confidence": 0.0,
+      "model": "gpt-4o-mini",
+      "reasoning": "反转策略已关闭",
+      "thought_markdown": "反转策略已关闭",
+      "key_factors": [
+        "市场: Bitcoin Up or Down - July 10, 6:30AM-6:45AM ET",
+        "选择结果: --",
+        "盘口: [0] Up @ 0.505 | [1] Down @ 0.495"
+      ],
+      "risk_flags": [],
+      "execution_summary": "AI 选择观望",
+      "focus_market": "Bitcoin Up or Down - July 10, 6:30AM-6:45AM ET"
+    },
+    {
+      "decision_id": "LOCAL-20260710-102822",
+      "generated_at": "2026-07-10T10:28:22.243926+00:00",
+      "action": "SKIP",
+      "decision": "SKIP",
+      "prediction": "SKIP",
+      "confidence": 0.0,
+      "model": "gpt-4o-mini",
+      "reasoning": "反转策略已关闭",
+      "thought_markdown": "反转策略已关闭",
+      "key_factors": [
+        "市场: Bitcoin Up or Down - July 10, 6:30AM-6:45AM ET",
+        "选择结果: --",
+        "盘口: [0] Up @ 0.505 | [1] Down @ 0.495"
+      ],
+      "risk_flags": [],
+      "execution_summary": "AI 选择观望",
+      "focus_market": "Bitcoin Up or Down - July 10, 6:30AM-6:45AM ET"
+    },
+    {
+      "decision_id": "LOCAL-20260710-102813",
+      "generated_at": "2026-07-10T10:28:13.332513+00:00",
+      "action": "SKIP",
+      "decision": "SKIP",
+      "prediction": "SKIP",
+      "confidence": 0.0,
+      "model": "gpt-4o-mini",
+      "reasoning": "反转策略已关闭",
+      "thought_markdown": "反转策略已关闭",
+      "key_factors": [
+        "市场: Bitcoin Up or Down - July 10, 6:30AM-6:45AM ET",
+        "选择结果: --",
+        "盘口: [0] Up @ 0.505 | [1] Down @ 0.495"
+      ],
+      "risk_flags": [],
+      "execution_summary": "AI 选择观望",
+      "focus_market": "Bitcoin Up or Down - July 10, 6:30AM-6:45AM ET"
+    },
+    {
+      "decision_id": "LOCAL-20260710-102804",
+      "generated_at": "2026-07-10T10:28:04.559525+00:00",
+      "action": "SKIP",
+      "decision": "SKIP",
+      "prediction": "SKIP",
+      "confidence": 0.0,
+      "model": "gpt-4o-mini",
+      "reasoning": "反转策略已关闭",
+      "thought_markdown": "反转策略已关闭",
+      "key_factors": [
+        "市场: Bitcoin Up or Down - July 10, 6:30AM-6:45AM ET",
+        "选择结果: --",
+        "盘口: [0] Up @ 0.505 | [1] Down @ 0.495"
+      ],
+      "risk_flags": [],
+      "execution_summary": "AI 选择观望",
+      "focus_market": "Bitcoin Up or Down - July 10, 6:30AM-6:45AM ET"
+    },
+    {
+      "decision_id": "LOCAL-20260710-102755",
+      "generated_at": "2026-07-10T10:27:55.813337+00:00",
+      "action": "SKIP",
+      "decision": "SKIP",
+      "prediction": "SKIP",
+      "confidence": 0.0,
+      "model": "gpt-4o-mini",
+      "reasoning": "反转策略已关闭",
+      "thought_markdown": "反转策略已关闭",
+      "key_factors": [
+        "市场: Bitcoin Up or Down - July 10, 6:30AM-6:45AM ET",
+        "选择结果: --",
+        "盘口: [0] Up @ 0.505 | [1] Down @ 0.495"
+      ],
+      "risk_flags": [],
+      "execution_summary": "AI 选择观望",
+      "focus_market": "Bitcoin Up or Down - July 10, 6:30AM-6:45AM ET"
+    },
+    {
+      "decision_id": "LOCAL-20260710-102747",
+      "generated_at": "2026-07-10T10:27:47.303833+00:00",
+      "action": "SKIP",
+      "decision": "SKIP",
+      "prediction": "SKIP",
+      "confidence": 0.0,
+      "model": "gpt-4o-mini",
+      "reasoning": "反转策略已关闭",
+      "thought_markdown": "反转策略已关闭",
+      "key_factors": [
+        "市场: Bitcoin Up or Down - July 10, 6:30AM-6:45AM ET",
+        "选择结果: --",
+        "盘口: [0] Up @ 0.505 | [1] Down @ 0.495"
+      ],
+      "risk_flags": [],
+      "execution_summary": "AI 选择观望",
+      "focus_market": "Bitcoin Up or Down - July 10, 6:30AM-6:45AM ET"
+    },
+    {
+      "decision_id": "LOCAL-20260710-102738",
+      "generated_at": "2026-07-10T10:27:38.805806+00:00",
+      "action": "SKIP",
+      "decision": "SKIP",
+      "prediction": "SKIP",
+      "confidence": 0.0,
+      "model": "gpt-4o-mini",
+      "reasoning": "反转策略已关闭",
+      "thought_markdown": "反转策略已关闭",
+      "key_factors": [
+        "市场: Bitcoin Up or Down - July 10, 6:30AM-6:45AM ET",
+        "选择结果: --",
+        "盘口: [0] Up @ 0.505 | [1] Down @ 0.495"
+      ],
+      "risk_flags": [],
+      "execution_summary": "AI 选择观望",
+      "focus_market": "Bitcoin Up or Down - July 10, 6:30AM-6:45AM ET"
+    },
+    {
+      "decision_id": "LOCAL-20260710-102730",
+      "generated_at": "2026-07-10T10:27:30.324544+00:00",
+      "action": "SKIP",
+      "decision": "SKIP",
+      "prediction": "SKIP",
+      "confidence": 0.0,
+      "model": "gpt-4o-mini",
+      "reasoning": "反转策略已关闭",
+      "thought_markdown": "反转策略已关闭",
+      "key_factors": [
+        "市场: Bitcoin Up or Down - July 10, 6:30AM-6:45AM ET",
+        "选择结果: --",
+        "盘口: [0] Up @ 0.505 | [1] Down @ 0.495"
+      ],
+      "risk_flags": [],
+      "execution_summary": "AI 选择观望",
+      "focus_market": "Bitcoin Up or Down - July 10, 6:30AM-6:45AM ET"
+    },
+    {
+      "decision_id": "LOCAL-20260710-102721",
+      "generated_at": "2026-07-10T10:27:21.533001+00:00",
+      "action": "SKIP",
+      "decision": "SKIP",
+      "prediction": "SKIP",
+      "confidence": 0.0,
+      "model": "gpt-4o-mini",
+      "reasoning": "反转策略已关闭",
+      "thought_markdown": "反转策略已关闭",
+      "key_factors": [
+        "市场: Bitcoin Up or Down - July 10, 6:30AM-6:45AM ET",
+        "选择结果: --",
+        "盘口: [0] Up @ 0.505 | [1] Down @ 0.495"
+      ],
+      "risk_flags": [],
+      "execution_summary": "AI 选择观望",
+      "focus_market": "Bitcoin Up or Down - July 10, 6:30AM-6:45AM ET"
+    },
+    {
+      "decision_id": "LOCAL-20260710-102712",
+      "generated_at": "2026-07-10T10:27:12.731839+00:00",
+      "action": "SKIP",
+      "decision": "SKIP",
+      "prediction": "SKIP",
+      "confidence": 0.0,
+      "model": "gpt-4o-mini",
+      "reasoning": "反转策略已关闭",
+      "thought_markdown": "反转策略已关闭",
+      "key_factors": [
+        "市场: Bitcoin Up or Down - July 10, 6:30AM-6:45AM ET",
+        "选择结果: --",
+        "盘口: [0] Up @ 0.505 | [1] Down @ 0.495"
+      ],
+      "risk_flags": [],
+      "execution_summary": "AI 选择观望",
+      "focus_market": "Bitcoin Up or Down - July 10, 6:30AM-6:45AM ET"
+    },
+    {
+      "decision_id": "LOCAL-20260710-102703",
+      "generated_at": "2026-07-10T10:27:03.857443+00:00",
+      "action": "SKIP",
+      "decision": "SKIP",
+      "prediction": "SKIP",
+      "confidence": 0.0,
+      "model": "gpt-4o-mini",
+      "reasoning": "反转策略已关闭",
+      "thought_markdown": "反转策略已关闭",
+      "key_factors": [
+        "市场: Bitcoin Up or Down - July 10, 6:30AM-6:45AM ET",
+        "选择结果: --",
+        "盘口: [0] Up @ 0.505 | [1] Down @ 0.495"
+      ],
+      "risk_flags": [],
+      "execution_summary": "AI 选择观望",
+      "focus_market": "Bitcoin Up or Down - July 10, 6:30AM-6:45AM ET"
+    },
+    {
+      "decision_id": "LOCAL-20260710-102655",
+      "generated_at": "2026-07-10T10:26:55.163228+00:00",
+      "action": "SKIP",
+      "decision": "SKIP",
+      "prediction": "SKIP",
+      "confidence": 0.0,
+      "model": "gpt-4o-mini",
+      "reasoning": "反转策略已关闭",
+      "thought_markdown": "反转策略已关闭",
+      "key_factors": [
+        "市场: Bitcoin Up or Down - July 10, 6:15AM-6:30AM ET",
+        "选择结果: --",
+        "盘口: [0] Up @ 0.835 | [1] Down @ 0.165"
+      ],
+      "risk_flags": [],
+      "execution_summary": "AI 选择观望",
+      "focus_market": "Bitcoin Up or Down - July 10, 6:15AM-6:30AM ET"
+    },
+    {
+      "decision_id": "LOCAL-20260710-102646",
+      "generated_at": "2026-07-10T10:26:46.568494+00:00",
+      "action": "SKIP",
+      "decision": "SKIP",
+      "prediction": "SKIP",
+      "confidence": 0.0,
+      "model": "gpt-4o-mini",
+      "reasoning": "反转策略已关闭",
+      "thought_markdown": "反转策略已关闭",
+      "key_factors": [
+        "市场: Bitcoin Up or Down - July 10, 6:15AM-6:30AM ET",
+        "选择结果: --",
+        "盘口: [0] Up @ 0.835 | [1] Down @ 0.165"
+      ],
+      "risk_flags": [],
+      "execution_summary": "AI 选择观望",
+      "focus_market": "Bitcoin Up or Down - July 10, 6:15AM-6:30AM ET"
+    },
+    {
+      "decision_id": "LOCAL-20260710-102637",
+      "generated_at": "2026-07-10T10:26:37.934096+00:00",
+      "action": "SKIP",
+      "decision": "SKIP",
+      "prediction": "SKIP",
+      "confidence": 0.0,
+      "model": "gpt-4o-mini",
+      "reasoning": "反转策略已关闭",
+      "thought_markdown": "反转策略已关闭",
+      "key_factors": [
+        "市场: Bitcoin Up or Down - July 10, 6:15AM-6:30AM ET",
+        "选择结果: --",
+        "盘口: [0] Up @ 0.835 | [1] Down @ 0.165"
+      ],
+      "risk_flags": [],
+      "execution_summary": "AI 选择观望",
+      "focus_market": "Bitcoin Up or Down - July 10, 6:15AM-6:30AM ET"
+    },
+    {
+      "decision_id": "LOCAL-20260710-102629",
+      "generated_at": "2026-07-10T10:26:29.282002+00:00",
+      "action": "SKIP",
+      "decision": "SKIP",
+      "prediction": "SKIP",
+      "confidence": 0.0,
+      "model": "gpt-4o-mini",
+      "reasoning": "反转策略已关闭",
+      "thought_markdown": "反转策略已关闭",
+      "key_factors": [
+        "市场: Bitcoin Up or Down - July 10, 6:15AM-6:30AM ET",
+        "选择结果: --",
+        "盘口: [0] Up @ 0.835 | [1] Down @ 0.165"
+      ],
+      "risk_flags": [],
+      "execution_summary": "AI 选择观望",
+      "focus_market": "Bitcoin Up or Down - July 10, 6:15AM-6:30AM ET"
+    },
+    {
+      "decision_id": "LOCAL-20260710-102620",
+      "generated_at": "2026-07-10T10:26:20.569196+00:00",
+      "action": "SKIP",
+      "decision": "SKIP",
+      "prediction": "SKIP",
+      "confidence": 0.0,
+      "model": "gpt-4o-mini",
+      "reasoning": "反转策略已关闭",
+      "thought_markdown": "反转策略已关闭",
+      "key_factors": [
+        "市场: Bitcoin Up or Down - July 10, 6:15AM-6:30AM ET",
+        "选择结果: --",
+        "盘口: [0] Up @ 0.835 | [1] Down @ 0.165"
+      ],
+      "risk_flags": [],
+      "execution_summary": "AI 选择观望",
+      "focus_market": "Bitcoin Up or Down - July 10, 6:15AM-6:30AM ET"
+    },
+    {
+      "decision_id": "LOCAL-20260710-102611",
+      "generated_at": "2026-07-10T10:26:11.716876+00:00",
+      "action": "SKIP",
+      "decision": "SKIP",
+      "prediction": "SKIP",
+      "confidence": 0.0,
+      "model": "gpt-4o-mini",
+      "reasoning": "反转策略已关闭",
+      "thought_markdown": "反转策略已关闭",
+      "key_factors": [
+        "市场: Bitcoin Up or Down - July 10, 6:15AM-6:30AM ET",
+        "选择结果: --",
+        "盘口: [0] Up @ 0.835 | [1] Down @ 0.165"
+      ],
+      "risk_flags": [],
+      "execution_summary": "AI 选择观望",
+      "focus_market": "Bitcoin Up or Down - July 10, 6:15AM-6:30AM ET"
+    }
+  ],
+  "stats": {
+    "total_trades": 0,
+    "winning_trades": 0,
+    "losing_trades": 0,
+    "total_profit": 0
+  },
+  "market": {},
+  "summary": {
+    "cash_balance": 100.0,
+    "reserved_balance": 0,
+    "ending_balance": 100.0,
+    "open_positions": 0,
+    "realized_pnl": 0,
+    "unrealized_pnl": 0.0,
+    "total_trades": 0,
+    "winning_trades": 0,
+    "win_rate": 0.0,
+    "session_started_at": "2026-07-10T08:29:09.718242+00:00"
+  },
+  "report": {
+    "strategy": "Generic Binary V1.1",
+    "profit": 0.0,
+    "roi_percent": 0.0,
+    "result": "running",
+    "session_started_at": "2026-07-10T08:29:09.718242+00:00"
+  }
+}

@@ -257,6 +257,7 @@ def _normalized_state_for_instance(ctx: dict, state: dict) -> dict:
         "unrealized_pnl": 0.0,
         "total_trades": len(trades),
         "winning_trades": winning,
+        "losing_trades": len(trades) - winning,
         "win_rate": round((winning / len(trades)) * 100, 2) if trades else 0.0,
         "session_started_at": session_started_at,
     })
@@ -437,6 +438,8 @@ def _build_config_payload(ctx: dict, state: dict, bot_status: dict) -> dict:
         "open_positions": summary.get("open_positions"),
         "total_trades": summary.get("total_trades"),
         "paper_win_rate": summary.get("win_rate"),
+        "paper_winning_trades": summary.get("winning_trades"),
+        "paper_losing_trades": summary.get("losing_trades"),
         "paper_profit": report.get("profit"),
         "paper_roi_percent": report.get("roi_percent"),
         "paper_balance": summary.get("ending_balance"),

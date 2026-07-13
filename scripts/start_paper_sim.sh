@@ -62,6 +62,11 @@ stop_pid_file "$BOT_PID_FILE"
 stop_pid_file "$SERVER_PID_FILE"
 stop_port_listener "$STATUS_PORT"
 
+# === Ensure local SOCKS5 proxy (xray) is up before bot starts ===
+# 2026-07-10: VPS 被 Binance 地理封锁, BTC 价必须通过本地代理拿
+# ensure_xray.sh 是 idempotent 的: 端口在听就啥也不做, 否则拉起
+bash "$(dirname "$0")/ensure_xray.sh" || { echo "FATAL: xray proxy not available, refusing to start bot"; exit 4; }
+
 archive_previous_run() {
     local archive_root="$ROOT_DIR/history"
     local stamp

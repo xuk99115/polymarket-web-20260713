@@ -199,6 +199,14 @@ export function renderPaperPerformance() {
     const endText = endingBalance == null ? '--' : formatUSD(endingBalance);
     const sessionText = sessionStartedAt ? `本轮 ${shortMinute(sessionStartedAt)} 起` : '本轮';
     subEl.textContent = `${sessionText} · ${startText} -> ${endText} · ${roiText}`;
+
+    // 2026-07-13: 胜/负统计
+    const tradeStats = document.getElementById('trade-stats');
+    if (tradeStats) {
+        const win = cfg.paper_winning_trades;
+        const lose = cfg.paper_losing_trades;
+        tradeStats.textContent = (win != null && lose != null) ? `${win} 胜 / ${lose} 负` : '--';
+    }
 }
 window.renderPaperPerformance = renderPaperPerformance;
 
