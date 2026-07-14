@@ -166,6 +166,11 @@ def _merge_book_quotes(market: Dict[str, Any], book: Dict[str, Any]) -> None:
     也把原始 bids/asks 写入 outcome["depth_bids"] / outcome["depth_asks"],
     供 _check_take_profit 做厚度检查.
     """
+    observed_at = book.get("observed_at")
+    if observed_at:
+        market["book_observed_at"] = observed_at
+        market["book_fetch_started_at"] = book.get("fetch_started_at")
+        market["book_fetch_latency_ms"] = book.get("fetch_latency_ms")
     by_index = {item.get("index"): item for item in book.get("outcomes", [])}
     for outcome in market.get("outcomes", []):
         book_item = by_index.get(outcome.get("index"))
@@ -176,6 +181,8 @@ def _merge_book_quotes(market: Dict[str, Any], book: Dict[str, Any]) -> None:
         # 存储原始深度供 TP 厚度检查
         outcome["depth_bids"] = bids
         outcome["depth_asks"] = asks
+        if observed_at:
+            outcome["book_observed_at"] = observed_at
         bid_price, ask_price = _pick_reasonable_quote(bids, asks, outcome.get("price"))
         if bid_price is not None and ask_price is not None:
             outcome["best_bid"] = bid_price

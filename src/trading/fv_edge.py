@@ -140,7 +140,15 @@ class FVEdgeStrategy:
             slug = market.get("slug", "")
             # Per-market ref_px: prefer manager's window_refs, then market
             # field, then global snap ref_px.
-            ref_override = (self._window_refs.get(slug) or {}).get("ref_px")
+            ref_record = self._window_refs.get(slug) or {}
+            ref_override = ref_record.get("ref_px")
+            # A global current price is not a valid strike for a specific
+            # rolling window. Require a post-start window reference and skip
+            # late references rather than manufacturing a false edge.
+            if slug.startswith("btc-updown-15m-") and (
+                not ref_override or ref_record.get("late_ref")
+            ):
+                continue
             market_ref = market.get("ref_px") or ref_override or global_ref_px
             sig = self._evaluate_market(
                 market, now_utc, btc_price, market_ref, sigma_15m,
@@ -229,6 +237,11 @@ class FVEdgeStrategy:
             "outcome_label": outcome_label,
             "current_bid": buy_bid,
             "current_ask": buy_price,
+            "book_observed_at": market.get("book_observed_at"),
+            "book_fetch_latency_ms": market.get("book_fetch_latency_ms"),
+            "btc_captured_at": self.last_btc_snap.get("captured_at") if self.last_btc_snap else None,
+            "btc_fetched_at": self.last_btc_snap.get("fetched_at") if self.last_btc_snap else None,
+            "btc_cache_age_secs": self.last_btc_snap.get("cache_age_secs", 0) if self.last_btc_snap else None,
             "reason": (
                 f"FV+edge | edge={edge_up_bps:+.0f}bps fair={fair_up:.2f} "
                 f"ref={ref_px:.0f} mte={minutes_to_end:.1f}min"

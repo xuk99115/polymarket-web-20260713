@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 import time
 import threading
 from dotenv import dotenv_values, load_dotenv
@@ -91,6 +92,9 @@ class _ConfigCache:
 
 _CACHE = _ConfigCache()
 
+# 配置专用日志器，用于输出大小写不匹配 / 使用默认值的警告
+logger = logging.getLogger("config")
+
 
 class Config:
     """统一配置入口。
@@ -106,13 +110,47 @@ class Config:
 
     @staticmethod
     def get(key: str, default: Any = None) -> Any:
+        # 1) runtime (trading_control.json, 前端写入)
         runtime = _CACHE.runtime()
         if key in runtime:
             return runtime[key]
+        # 大小写容错: 前端可能写小写, 后端读大写 (或反之)
+        for alt_key in (key.upper(), key.lower()):
+            if alt_key != key and alt_key in runtime:
+                logger.warning(
+                    "Config 大小写不匹配: 代码读 '%s', trading_control.json 写 '%s', 值=%s",
+                    key, alt_key, runtime[alt_key],
+                )
+                return runtime[alt_key]
+
+        # 2) .env 文件
         env_config = _CACHE.env()
         if key in env_config and env_config[key] not in (None, ""):
             return env_config[key]
-        return os.getenv(key, default)
+        for alt_key in (key.upper(), key.lower()):
+            if alt_key != key and alt_key in env_config and env_config[alt_key] not in (None, ""):
+                logger.warning(
+                    "Config 大小写不匹配: 代码读 '%s', .env 写 '%s', 值=%s",
+                    key, alt_key, env_config[alt_key],
+                )
+                return env_config[alt_key]
+
+        # 3) 进程环境变量
+        val = os.getenv(key)
+        if val is not None:
+            return val
+        for alt_key in (key.upper(), key.lower()):
+            if alt_key != key:
+                val = os.getenv(alt_key)
+                if val is not None:
+                    logger.warning(
+                        "Config 大小写不匹配: 代码读 '%s', 环境变量写 '%s', 值=%s",
+                        key, alt_key, val,
+                    )
+                    return val
+
+        logger.debug("Config 使用默认值: %s = %s", key, default)
+        return default
 
     @staticmethod
     def get_bool(key: str, default: str = "true") -> bool:

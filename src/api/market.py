@@ -3,6 +3,7 @@ import asyncio
 import logging
 import math
 import os
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -460,16 +461,31 @@ class PolymarketClient:
         2026-06-24 优化: timeout 从 2s 降到 1s — WS 在韩国网络下基本连不上,
         2s timeout 让每个 microstructure 拖到 8-10s, 拖慢整个 cycle.
         """
+        started_at = datetime.now(timezone.utc)
+        started_mono = time.perf_counter()
         use_ws = Config.get_bool("USE_POLYMARKET_WS", "true")
         if use_ws:
             try:
                 result = await self.get_microstructure_ws(market, timeout=1.0)
                 if result.get("outcomes"):
-                    return result
-                logger.debug("WS microstructure returned empty, falling back to REST")
+                    source = "ws"
+                else:
+                    logger.debug("WS microstructure returned empty, falling back to REST")
+                    result = await self._get_microstructure_rest(market)
+                    source = result.get("source", "none")
             except Exception as exc:
                 logger.debug("WS microstructure skipped (%s), REST fallback", exc)
-        return await self._get_microstructure_rest(market)
+                result = await self._get_microstructure_rest(market)
+                source = result.get("source", "none")
+        else:
+            result = await self._get_microstructure_rest(market)
+            source = result.get("source", "none")
+
+        result["source"] = source
+        result["fetch_started_at"] = started_at.isoformat()
+        result["observed_at"] = datetime.now(timezone.utc).isoformat()
+        result["fetch_latency_ms"] = round((time.perf_counter() - started_mono) * 1000.0, 1)
+        return result
 
     async def _get_microstructure_rest(self, market: Dict[str, Any]) -> Dict[str, Any]:
         """Original REST implementation - kept as fallback."""

@@ -394,6 +394,10 @@ def _resolve_settlement_price(market: Dict[str, Any], outcome: Dict[str, Any],
                     # Bug fix 2026-07-01: 赢家 redeem 到 1.0
                     if sp >= 0.5 and _market_settled(market):
                         settlement = 1.0
+                    elif sp >= 0.5:
+                        # Oracle 还没结算, outcomePrices 是 stale 最后成交价.
+                        # 返回 0.0 让调用方走延迟结算 (pending_settle), 等 oracle.
+                        settlement = 0.0
                     else:
                         settlement = sp
             except (ValueError, TypeError):
@@ -408,12 +412,32 @@ def _resolve_settlement_price(market: Dict[str, Any], outcome: Dict[str, Any],
 
 
 def _market_settled(market: Dict[str, Any]) -> bool:
-    """判断 Polymarket 市场是否已 settle (过期 + outcomePrices 已就绪).
+    """判断 Polymarket 市场是否已 settle (oracle 已出结果).
 
-    用于 redeem-aware 逻辑: 只有市场确实 settled, 才把 outcomePrices >= 0.5
-    解释为"赢家", 返回 1.0 (redeem). 中途 outcomePrices >= 0.5 但市场还没
-    settle 时仍按当前值算 (避免提前 redeem).
+    用于 redeem-aware 逻辑: 只有 oracle 确实结算了, 才把 outcomePrices 解释为
+    "赢家/输家", 返回 1.0 (redeem). 如果 outcomePrices 仍是 stale 的最后成交价
+    (两个价格都在 0.05~0.95 之间), 说明 oracle 还没结算, 返回 False.
+
+    Oracle 结算后, 赢家价格一定是 1.0 (或接近 1.0), 输家是 0.0 (或接近 0.0).
     """
+    # 1) 检查 outcomePrices 是否已经是 oracle 结算结果
+    outcome_prices = market.get("outcomePrices")
+    if outcome_prices and isinstance(outcome_prices, (list, tuple)):
+        prices = []
+        for p in outcome_prices:
+            try:
+                prices.append(float(p))
+            except (ValueError, TypeError):
+                return False
+        if len(prices) >= 2:
+            # 两个价格都在中间区间 → oracle 还没结算, 是 stale 最后成交价
+            if all(0.05 < p < 0.95 for p in prices[:2]):
+                return False
+            # 至少有一个价格接近 1.0 → oracle 已结算
+            if any(p >= 0.95 for p in prices[:2]):
+                return True
+
+    # 2) 兜底: 用 closed 标记或 end_date 判断
     if market.get("closed"):
         return True
     end_date = market.get("end_date")
@@ -617,8 +641,8 @@ class TradingBotManager:
             counted_keys.add(key)
             unrealized_pnl += round(shares * current_bid - stake, 4)
 
-        # trades[] 里 LowBuy 仓位 (走直写路径), 也算入浮盈.
-        trades = state.get("trades", [])
+        # trades[] + lowbuy_trades[] 的盈亏统计
+        trades = state.get("lowbuy_trades", []) + state.get("trades", [])
         for t in trades:
             if t.get("status") != "OPEN":
                 continue
@@ -753,6 +777,9 @@ class TradingBotManager:
             settlement = _resolve_settlement_price(market, outcome)
             logger.info("⚖️ [结算] %s outcome=%s 过期结算价=%.1f¢",
                         market.get("slug","")[-16:], outcome.get("label","?"), settlement * 100)
+            if settlement <= 0:
+                # Oracle 尚未结算, 跳过本轮, 下个 cycle 再试
+                return None, None
             return settlement, "EXPIRY_EXIT"
 
         stake = safe_float(position.get("stake"), 0.0) or 0.0
@@ -844,8 +871,8 @@ class TradingBotManager:
     def _find_duplicate_exposure(self, market: Dict[str, Any]) -> Optional[str]:
         state = self.state_manager.get_state()
         market_slug = market.get("slug")
-        # Bug fix 2026-06-25: 优先读 trades (source of truth), positions 兜底
-        for t in state.get("trades", []):
+        # Bug fix 2026-06-25: 优先读 trades (source of truth), lowbuy_trades 兜底, positions 兜底
+        for t in state.get("lowbuy_trades", []) + state.get("trades", []):
             if t.get("status") == "OPEN" and t.get("market_slug") == market_slug:
                 return f"已有持仓 (trades): {t.get('outcome') or t.get('outcome_name')}"
         for position in state.get("positions", []):
@@ -883,7 +910,7 @@ class TradingBotManager:
             and pos.get("strategy") != "arbitrage"
         )
         open_from_trades = sum(
-            1 for t in state.get("trades", [])
+            1 for t in state.get("lowbuy_trades", []) + state.get("trades", [])
             if t.get("status") == "OPEN"
             and t.get("strategy") != "arbitrage"
         )
@@ -906,16 +933,16 @@ class TradingBotManager:
         启动时 / cycle 开始时调用, 保证 bot 重启后 engine 不会"忘记"
         哪些 lowbuy 仓位还在等翻倍 / 时间止损.
 
-        Bug fix 2026-06-25: state.positions 一直空着, 真实仓位在 trades[].status==OPEN.
-        所以同步源必须用 trades.
+        Bug fix 2026-06-25: state.positions 一直空着, 真实仓位在 trades[]/lowbuy_trades[].status==OPEN.
+        所以同步源必须用 trades + lowbuy_trades.
         """
         try:
             state = self.state_manager.get_state()
             current_slugs = set(self.lowbuy_engine.open_positions().keys())
             actual_slugs = set()
 
-            # 1) 同步源: state.trades 里 status==OPEN 的 lowbuy 仓位
-            for t in state.get("trades", []):
+            # 1) 同步源: state.lowbuy_trades 里 status==OPEN 的 lowbuy 仓位 (跟主 trades 拆分)
+            for t in state.get("lowbuy_trades", []) + state.get("trades", []):
                 if (
                     t.get("strategy") == "lowbuy_double"
                     and t.get("status") == "OPEN"
@@ -1110,7 +1137,7 @@ class TradingBotManager:
         # 再覆盖同窗口 — 这反而是想要的, 末段信号不应该破坏中段仓位)
         state = self.state_manager.get_state()
         slug = market.get("slug", "")
-        for t in state.get("trades", []):
+        for t in state.get("lowbuy_trades", []) + state.get("trades", []):
             if (
                 t.get("market_slug") == slug
                 and t.get("strategy") == signal_source
@@ -1338,11 +1365,11 @@ class TradingBotManager:
         # 之前用 `if not bid_price or bid_price <= 0: return None` 会让兜底永远不执行
         # 改成: 走真实 trade 路径, 用 entry price 估算 pnl
 
-        # 找 state.json 里 lowbuy 的 open 仓位
+        # 找 state.json 里 lowbuy 的 open 仓位 (从 lowbuy_trades 找, 跟主流水拆分)
         # Bug fix 2026-06-25: 读 trades 而不是 positions (trades 才是真相).
         state = self.state_manager.get_state()
         position = None
-        for t in state.get("trades", []):
+        for t in state.get("lowbuy_trades", []) + state.get("trades", []):
             if (
                 t.get("market_slug") == slug
                 and t.get("strategy") == "lowbuy_double"
@@ -1365,8 +1392,8 @@ class TradingBotManager:
             logger.debug("[LowBuy] 平仓请求: state.json 里没找到对应仓位 (%s)", slug)
             # 引擎自己清掉 (防止僵尸)
             self.lowbuy_engine.close_position(slug)
-            # 同时把 trades 里匹配的 OPEN 标为过期 (兜底兜底, 防止僵尸)
-            for t in state.get("trades", []):
+            # 同时把 lowbuy_trades 里匹配的 OPEN 标为过期 (兜底兜底, 防止僵尸)
+            for t in state.get("lowbuy_trades", []) + state.get("trades", []):
                 if (t.get("market_slug") == slug
                     and t.get("status") == "OPEN"
                     and t.get("strategy") == "lowbuy_double"):
@@ -1525,8 +1552,8 @@ class TradingBotManager:
                 position.pop("closed_at", None)
                 position.pop("realized_profit", None)
                 position.pop("close_price", None)
-                # 同步到 trades list
-                trade_record = next((t for t in state.get("trades", [])
+                # 同步到 trades / lowbuy_trades 列表
+                trade_record = next((t for t in state.get("lowbuy_trades", []) + state.get("trades", [])
                                      if t.get("market_slug") == slug
                                      and t.get("status") == "OPEN"
                                      and t.get("strategy") == "lowbuy_double"), None)
@@ -1666,6 +1693,12 @@ class TradingBotManager:
                 "direction_hint": signal.get("direction_hint"),
                 "obi": signal.get("obi"),
                 "recent_ask_drop": signal.get("recent_ask_drop"),
+                "book_observed_at": signal.get("book_observed_at"),
+                "book_fetch_latency_ms": signal.get("book_fetch_latency_ms"),
+                "btc_captured_at": signal.get("btc_captured_at"),
+                "btc_fetched_at": signal.get("btc_fetched_at"),
+                "btc_cache_age_secs": signal.get("btc_cache_age_secs"),
+                "code_version": "v2",
             }
 
             # 扣现金前做余额防御。LowBuy 走直写 state 路径, 不经过 PaperExecutor.open_position()
@@ -1680,8 +1713,11 @@ class TradingBotManager:
             positions = state.setdefault("positions", [])
             positions.append(position)
 
-            # 同时追加到 trades (让历史里看得见)
-            trades = state.setdefault("trades", [])
+            # 追加到对应流水: fv_edge 进主 trades, lowbuy 进 lowbuy_trades
+            if strategy_tag == "fv_edge":
+                trades = state.setdefault("trades", [])
+            else:
+                trades = state.setdefault("lowbuy_trades", [])
             # 用 position 里已有的 tp_target (如果有), 否则算 entry_price * LOWBUY_TP_MULT
             tp_target = position.get("tp_target", entry_price * LOWBUY_TP_MULT)
             trade_record = {
@@ -1707,6 +1743,12 @@ class TradingBotManager:
                 "direction_hint": signal.get("direction_hint"),
                 "obi": signal.get("obi"),
                 "recent_ask_drop": signal.get("recent_ask_drop"),
+                "book_observed_at": signal.get("book_observed_at"),
+                "book_fetch_latency_ms": signal.get("book_fetch_latency_ms"),
+                "btc_captured_at": signal.get("btc_captured_at"),
+                "btc_fetched_at": signal.get("btc_fetched_at"),
+                "btc_cache_age_secs": signal.get("btc_cache_age_secs"),
+                "code_version": "v2",
             }
             trades.append(trade_record)
 
@@ -1767,7 +1809,7 @@ class TradingBotManager:
         待结算仓位永久卡 OPEN。
         """
         state = self.state_manager.get_state()
-        for t in state.get("trades", []):
+        for t in state.get("lowbuy_trades", []) + state.get("trades", []):
             if (
                 t.get("status") == "OPEN"
                 and t.get("pending_settle")
@@ -1794,7 +1836,7 @@ class TradingBotManager:
                 if not outcome_prices:
                     continue
                 # 找到对应的 outcome 和仓位
-                for t in state.get("trades", []):
+                for t in state.get("lowbuy_trades", []) + state.get("trades", []):
                     if t.get("market_slug") == slug and t.get("status") == "OPEN" and t.get("pending_settle"):
                         outcome_idx = t.get("outcome_index")
                         outcomes = market.get("outcomes", [])
@@ -2129,9 +2171,11 @@ class TradingBotManager:
         # ============================================================
         # LowBuy-Double 阶段 — 中段低买翻倍 (跟 reversal 并行)
         # ============================================================
-        # 先同步 lowbuy 引擎的 open positions (从 state.json 重新读,
-        # 这样 bot 重启 / state 漂移后能自愈)
-        self._lowbuy_sync_positions()
+        lowbuy_enabled = Config.get_bool("LOWBUY_ENABLED", "true")
+        if lowbuy_enabled:
+            # 先同步 lowbuy 引擎的 open positions (从 state.json 重新读,
+            # 这样 bot 重启 / state 漂移后能自愈)
+            self._lowbuy_sync_positions()
 
         # 拉所有 BTC 15m 窗口的最新盘口 (lowbuy 可能看上非 focus_market 的窗口)
         snapshots_for_lowbuy = []
@@ -2219,74 +2263,75 @@ class TradingBotManager:
         lowbuy_fair_up = None
         if self.LOWBUY_FV_FILTER_ENABLED and rule_signal:
             lowbuy_fair_up = rule_signal.get("fair_up")
-        # 获取 BTC 趋势方向用于 LowBuy 方向过滤
-        lowbuy_direction = (btc or {}).get("direction_hint", "flat") if btc else None
-        lowbuy_signals = self.lowbuy_engine.scan(
-            snapshots_for_lowbuy, now_utc,
-            fair_up=lowbuy_fair_up, direction_hint=lowbuy_direction,
-        )
-        if snapshots_for_lowbuy:
-            # debug: 打印每个窗口的实际价格
-            for s in snapshots_for_lowbuy:
-                if s.get("slug","").startswith("btc-updown-15m-"):
-                    end = iso_to_utc_dt(s.get("end_date",""))
-                    mins = (end - now_utc).total_seconds() / 60
-                    prices = []
-                    for o in s.get("outcomes",[]):
-                        a = float(o.get("best_ask",0) or 0)
-                        b = float(o.get("best_bid",0) or 0)
-                        prices.append(f'{o["label"][:1]}{a*100:.0f}¢/b{b*100:.0f}¢')
-                    if 0 <= mins <= 15:
-                        logger.info("  [LowBuy] %s 剩 %.1fmin: %s → 信号=%d",
-                            s["slug"][-14:], mins, " ".join(prices), len(lowbuy_signals))
-            logger.info(
-                "🔍 [LowBuy] 扫描 %d 个窗口, 信号=%d",
-                len(snapshots_for_lowbuy),
-                len(lowbuy_signals),
-            )
         lowbuy_messages = []
-        # Bug fix 2026-06-26: 信号去重 — 防止同 cycle 内重复 signal 被多次执行.
-        # 同一 slug 的 BUY + TP/TIME_STOP 同时触发时, 先平后开逻辑要串行化.
-        # 用 dict 做 signature → signal 映射, 只保留每个 slug 第一个出现的信号.
-        seen_slugs = set()
-        deduped_signals = []
-        for sig in lowbuy_signals:
-            slug = sig.get("slug", "")
-            action = sig.get("action", "")
-            key = f"{slug}:{action}"
-            if key in seen_slugs:
-                continue
-            seen_slugs.add(key)
-            deduped_signals.append(sig)
-        lowbuy_signals = deduped_signals
-
-        # 处理顺序: BUY 和 TP/TIME_STOP 优先级
-        # 1) 先执行所有 TAKE_PROFIT/TIME_STOP (关闭现有仓位)
-        # 2) 再执行所有 BUY (开新仓位, 不会被 slug 唯一性拦截因为已关闭)
-        for sig in [s for s in lowbuy_signals if s.get("action") in ("TAKE_PROFIT", "TIME_STOP")]:
-            try:
-                msg = await self._execute_lowbuy_signal(sig, snapshots_for_lowbuy, now_utc)
-                if msg:
-                    lowbuy_messages.append(msg)
-            except Exception as exc:
-                logger.error("[LowBuy] 执行信号失败: %s", exc)
-                lowbuy_messages.append(f"LowBuy 异常: {exc}")
-
-        for sig in [s for s in lowbuy_signals if s.get("action") == "BUY"]:
-            try:
-                msg = await self._execute_lowbuy_signal(sig, snapshots_for_lowbuy, now_utc)
-                if msg:
-                    lowbuy_messages.append(msg)
-            except Exception as exc:
-                logger.error("[LowBuy] 执行信号失败: %s", exc)
-                lowbuy_messages.append(f"LowBuy 异常: {exc}")
-
-        if lowbuy_messages:
-            execution_summary = (
-                execution_summary + " | " + "；".join(lowbuy_messages)
-                if execution_summary and execution_summary != "未执行"
-                else "；".join(lowbuy_messages)
+        if lowbuy_enabled:
+            # 获取 BTC 趋势方向用于 LowBuy 方向过滤
+            lowbuy_direction = (btc or {}).get("direction_hint", "flat") if btc else None
+            lowbuy_signals = self.lowbuy_engine.scan(
+                snapshots_for_lowbuy, now_utc,
+                fair_up=lowbuy_fair_up, direction_hint=lowbuy_direction,
             )
+            if snapshots_for_lowbuy:
+                # debug: 打印每个窗口的实际价格
+                for s in snapshots_for_lowbuy:
+                    if s.get("slug","").startswith("btc-updown-15m-"):
+                        end = iso_to_utc_dt(s.get("end_date",""))
+                        mins = (end - now_utc).total_seconds() / 60
+                        prices = []
+                        for o in s.get("outcomes",[]):
+                            a = float(o.get("best_ask",0) or 0)
+                            b = float(o.get("best_bid",0) or 0)
+                            prices.append(f'{o["label"][:1]}{a*100:.0f}¢/b{b*100:.0f}¢')
+                        if 0 <= mins <= 15:
+                            logger.info("  [LowBuy] %s 剩 %.1fmin: %s → 信号=%d",
+                                s["slug"][-14:], mins, " ".join(prices), len(lowbuy_signals))
+                logger.info(
+                    "🔍 [LowBuy] 扫描 %d 个窗口, 信号=%d",
+                    len(snapshots_for_lowbuy),
+                    len(lowbuy_signals),
+                )
+            # Bug fix 2026-06-26: 信号去重 — 防止同 cycle 内重复 signal 被多次执行.
+            # 同一 slug 的 BUY + TP/TIME_STOP 同时触发时, 先平后开逻辑要串行化.
+            # 用 dict 做 signature → signal 映射, 只保留每个 slug 第一个出现的信号.
+            seen_slugs = set()
+            deduped_signals = []
+            for sig in lowbuy_signals:
+                slug = sig.get("slug", "")
+                action = sig.get("action", "")
+                key = f"{slug}:{action}"
+                if key in seen_slugs:
+                    continue
+                seen_slugs.add(key)
+                deduped_signals.append(sig)
+            lowbuy_signals = deduped_signals
+
+            # 处理顺序: BUY 和 TP/TIME_STOP 优先级
+            # 1) 先执行所有 TAKE_PROFIT/TIME_STOP (关闭现有仓位)
+            # 2) 再执行所有 BUY (开新仓位, 不会被 slug 唯一性拦截因为已关闭)
+            for sig in [s for s in lowbuy_signals if s.get("action") in ("TAKE_PROFIT", "TIME_STOP")]:
+                try:
+                    msg = await self._execute_lowbuy_signal(sig, snapshots_for_lowbuy, now_utc)
+                    if msg:
+                        lowbuy_messages.append(msg)
+                except Exception as exc:
+                    logger.error("[LowBuy] 执行信号失败: %s", exc)
+                    lowbuy_messages.append(f"LowBuy 异常: {exc}")
+
+            for sig in [s for s in lowbuy_signals if s.get("action") == "BUY"]:
+                try:
+                    msg = await self._execute_lowbuy_signal(sig, snapshots_for_lowbuy, now_utc)
+                    if msg:
+                        lowbuy_messages.append(msg)
+                except Exception as exc:
+                    logger.error("[LowBuy] 执行信号失败: %s", exc)
+                    lowbuy_messages.append(f"LowBuy 异常: {exc}")
+
+            if lowbuy_messages:
+                execution_summary = (
+                    execution_summary + " | " + "；".join(lowbuy_messages)
+                    if execution_summary and execution_summary != "未执行"
+                    else "；".join(lowbuy_messages)
+                )
 
         # 2026-07-11: fv_edge 信号消息并入 execution_summary (供前端展示)
         if fv_edge_messages:
@@ -2297,7 +2342,11 @@ class TradingBotManager:
             )
 
         # 把 lowbuy 引擎状态加到 status export
-        lowbuy_summary = self.lowbuy_engine.get_state_summary()
+        lowbuy_summary = self.lowbuy_engine.get_state_summary() if lowbuy_enabled else {
+            "strategy": "LowBuy",
+            "enabled": False,
+            "reason": "已通过 LOWBUY_ENABLED=false 关闭",
+        }
         hedged_limit_summary = self.hedged_limit_engine.get_state_summary(self.state_manager.get_state())
         fv_edge_summary = self.fv_edge.diagnostics() if hasattr(self, "fv_edge") else {
             "strategy": "FVEdge", "enabled": False,
@@ -2331,16 +2380,14 @@ class TradingBotManager:
         try:
             while self.running:
                 try:
+                    _cycle_start = _time.monotonic()
                     await self.run_cycle()
-                    # 2026-06-23 优化: AI 已下线, 不再需要等 AI decision interval.
-                    # Singapore VPS 响应 50-200ms, 2s poll 能抢到低价信号.
-                    # 5s 时已经测过会有 0.39→0.55 间的信号漏掉.
-                    # 警告 (2026-06-27): hard-code 2s, 不读 env. 如果 .env 里有
-                    # AI_DECISION_INTERVAL_SECONDS, 改了不会生效 — 这是设计选择
-                    # (实测 2s 最优, env 180s 默认会让 cycle 太慢漏信号).
-                    # 用户如果真要改: 直接改这里的 2.
-                    interval = 2
-                    await asyncio.sleep(interval)
+                    # 绝对时间调度: 计算本轮实际耗时, sleep(2 - 耗时).
+                    # 如果 run_cycle 耗时 >= 2s, 跳过 sleep 立即执行下一轮.
+                    _elapsed = _time.monotonic() - _cycle_start
+                    _remain = 2.0 - _elapsed
+                    if _remain > 0:
+                        await asyncio.sleep(_remain)
                 except Exception as exc:  # noqa: BLE001
                     logger.exception("run_cycle crashed: %s", exc)
                     await asyncio.sleep(10)
@@ -2402,24 +2449,39 @@ class TradingBotManager:
             logger.debug("btc_tick_write_failed: %s", exc)
 
     def _estimate_sigma_from_history(self, history: List[Dict[str, Any]]) -> Optional[float]:
-        prices = []
+        observations = []
         for item in history[-60:]:
+            # Cached 2s dashboard samples are not new market observations.
+            if item.get("cached"):
+                continue
             p = safe_float(item.get("price"))
-            if p is not None and p > 0:
-                prices.append(p)
-        if len(prices) < 4:
+            raw_t = item.get("t")
+            if p is None or p <= 0 or not raw_t:
+                continue
+            try:
+                t = datetime.fromisoformat(str(raw_t).replace("Z", "+00:00")).timestamp()
+            except (TypeError, ValueError, OverflowError):
+                continue
+            observations.append((t, p))
+        if len(observations) < 4:
             return None
+        observations.sort(key=lambda item: item[0])
         returns = []
-        for a, b in zip(prices, prices[1:]):
-            if a > 0 and b > 0 and a != b:
-                returns.append(math.log(b / a))
-        if len(returns) < 2:
+        total_dt = 0.0
+        for (t0, p0), (t1, p1) in zip(observations, observations[1:]):
+            dt = t1 - t0
+            if dt <= 0 or dt > 900 or p0 <= 0 or p1 <= 0:
+                continue
+            returns.append((math.log(p1 / p0), dt))
+            total_dt += dt
+        if len(returns) < 3 or total_dt < 120.0:
             return None
-        mean = sum(returns) / len(returns)
-        var = sum((r - mean) ** 2 for r in returns) / (len(returns) - 1)
-        sigma_sample = math.sqrt(max(var, 0.0))
-        # history 当前最多约 60 个、2s 一个；真实刷新点较稀疏时这是保守近似。
-        sigma_15m = sigma_sample * math.sqrt(900.0 / 2.0)
+
+        # Estimate variance per second using the actual interval between
+        # fresh observations. This avoids treating a 60s API refresh as 2s.
+        drift_rate = sum(ret for ret, _ in returns) / total_dt
+        variance_rate = sum((ret - drift_rate * dt) ** 2 for ret, dt in returns) / total_dt
+        sigma_15m = math.sqrt(max(variance_rate, 0.0) * 900.0)
         if sigma_15m <= 0 or math.isnan(sigma_15m) or math.isinf(sigma_15m):
             return None
         return max(sigma_15m, FAIR_MIN_SIGMA)
@@ -2433,7 +2495,12 @@ class TradingBotManager:
             return ref
         start_dt = self._slug_start_dt(slug)
         end_dt = iso_to_utc_dt(market.get("end_date", "")) if market.get("end_date") else None
-        # 第一次看到该窗口时记录 ref_px。理想情况接近开盘；若 bot 中途启动，标记 late_ref 供校准时识别。
+        # Do not use a pre-window price as the settlement strike. The market
+        # scanner can see upcoming windows before their start timestamp.
+        if start_dt and now_utc < start_dt:
+            return None
+        # Record the first post-start price. If the bot started late, retain
+        # the marker so those samples can be excluded during calibration.
         ref = {
             "window_start": start_dt.isoformat() if start_dt else None,
             "window_end": end_dt.isoformat() if end_dt else None,
@@ -2509,6 +2576,11 @@ class TradingBotManager:
                 "edge_down_bps": (round(((1.0 - fair_up) - market_down_ask) * 10000.0, 2) if market_down_ask else None),
                 "lowbuy_filter_enabled": self.LOWBUY_FV_FILTER_ENABLED,
                 "late_ref": bool((ref or {}).get("late_ref")),
+                "btc_captured_at": snap.get("captured_at"),
+                "btc_fetched_at": snap.get("fetched_at"),
+                "btc_cache_age_secs": snap.get("cache_age_secs", 0),
+                "book_observed_at": market.get("book_observed_at"),
+                "book_fetch_latency_ms": market.get("book_fetch_latency_ms"),
             }
             try:
                 self._append_jsonl(self.FAIR_VALUE_PREDICTIONS_FILE, event)
@@ -2526,14 +2598,18 @@ class TradingBotManager:
         while self.running:
             try:
                 now_ts = _time.time()
+                fresh_fetch = False
                 # 距离上次 API 调用超过间隔才 fetch
                 if now_ts - self._last_btc_ts >= self._btc_fetch_interval:
                     snap = await self.btc_api.get_signal_context()
                     if not snap or snap.get("price") is None:
                         snap = await self.btc_api._get_coingecko_price()
                     if snap:
+                        snap = dict(snap)
+                        snap["fetched_at"] = datetime.now(timezone.utc).isoformat()
                         self._last_btc_price = snap
                         self._last_btc_ts = now_ts
+                        fresh_fetch = True
                         logger.debug("btc_monitor: fetched price=%.2f source=%s",
                                      snap.get("price", 0), snap.get("source", "?"))
                     else:
@@ -2543,7 +2619,7 @@ class TradingBotManager:
                 if self._last_btc_price:
                     snap = dict(self._last_btc_price)
                     snap["captured_at"] = datetime.now(timezone.utc).isoformat()
-                    snap["cached"] = True
+                    snap["cached"] = not fresh_fetch
                     snap["cache_age_secs"] = int(now_ts - self._last_btc_ts)
                     ref_px = safe_float(snap.get("ref_px")) or safe_float(snap.get("price")) or 0.0
                     sigma = safe_float(snap.get("sigma_15m"))
@@ -2571,7 +2647,12 @@ class TradingBotManager:
                         snap["fair_direction"] = "up" if fv_up > fv_down else "down"
                     # 滚动保存历史 (in-memory)
                     history = getattr(self, "_btc_history", [])
-                    history.append({"t": snap["captured_at"], "price": snap.get("price")})
+                    if fresh_fetch:
+                        history.append({
+                            "t": snap.get("fetched_at") or snap["captured_at"],
+                            "price": snap.get("price"),
+                            "cached": False,
+                        })
                     self._btc_history = history[-self.BTC_SNAPSHOT_HISTORY:]
                     snap["history"] = self._btc_history
 

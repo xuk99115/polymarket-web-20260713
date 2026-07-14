@@ -94,21 +94,26 @@ class PaperExecutor(BaseExecutor):
         
         now_utc = datetime.now(timezone.utc)
         shares = round(stake / entry_price, 6)
+        outcome_label = quote.get("label") or outcome
+        trade_id = _short_id("trade")
         
         position = {
             "id": _short_id("paper"),
             "market": snapshot.get("slug") or snapshot.get("question"),
             "market_slug": snapshot.get("slug"),
             "market_title": snapshot.get("question"),
+            "market_question": snapshot.get("question"),  # 统一字段名，供 close 匹配
             "end_date": snapshot.get("end_date"),
             "outcome": outcome,
             "outcome_name": outcome,
+            "outcome_label": outcome_label,  # 新增：close_position 匹配用
             "outcome_index": quote.get("outcome_index"),
             "token_id": quote.get("token_id"),
             "stake": stake,
             "size": shares,
             "shares": shares,
             "entry_price": entry_price,
+            "entry_trade_id": trade_id,  # 新增：close_position 精确匹配用
             "current_bid": quote.get("best_bid"),
             "current_ask": quote.get("best_ask"),
             "created_at": now_utc.isoformat(),
@@ -117,11 +122,12 @@ class PaperExecutor(BaseExecutor):
         }
 
         trade = {
-            "id": _short_id("trade"),
+            "id": trade_id,
             "decision_id": signal.get("decision_id") if signal else None,
             "created_at": now_utc.isoformat(),
             "side": "BUY",
             "outcome": outcome,
+            "outcome_label": outcome_label,  # 新增：反向查找用
             "market": snapshot.get("question"),
             "market_slug": snapshot.get("slug"),
             "amount": stake,
@@ -129,6 +135,7 @@ class PaperExecutor(BaseExecutor):
             "price": entry_price,
             "status": "OPEN",
             "reason": signal.get("reason") if signal else "",
+            "code_version": "v2",
         }
         
         state["positions"].append(position)
@@ -184,7 +191,7 @@ class PaperExecutor(BaseExecutor):
             "created_at": datetime.now(timezone.utc).isoformat(),
             "side": "SELL",
             "outcome": position.get("outcome"),
-            "market": position.get("market_title") or position.get("market"),
+            "market": position.get("market_title") or position.get("market_question") or position.get("market", ""),
             "market_slug": position.get("market_slug"),
             "amount": proceeds,
             "size": position.get("shares"),
@@ -193,6 +200,7 @@ class PaperExecutor(BaseExecutor):
             "reason": exit_reason,
             "realized_profit": profit,
             "entry_trade_id": position.get("entry_trade_id"),
+            "code_version": "v2",
         })
         
         self.state_manager.save()
