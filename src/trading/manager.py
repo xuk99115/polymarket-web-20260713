@@ -437,18 +437,11 @@ def _market_settled(market: Dict[str, Any]) -> bool:
             if any(p >= 0.95 for p in prices[:2]):
                 return True
 
-    # 2) 兜底: 用 closed 标记或 end_date 判断
+    # 2) 兜底: 用 closed 标记判断 (Polymarket 官方标记)
     if market.get("closed"):
         return True
-    end_date = market.get("end_date")
-    if not end_date:
-        return False
-    try:
-        ed = iso_to_utc_dt(end_date)
-        # 加 30s 缓冲, 让 outcomePrices 有时间 settle
-        return datetime.now(timezone.utc) >= ed + timedelta(seconds=30)
-    except Exception:
-        return False
+    # 没有 outcomePrices 就不能确认 oracle 已结算, 等下次重试
+    return False
 
 
 # Bug fix 2026-07-01: batch save 上下文管理器.
@@ -787,8 +780,9 @@ class TradingBotManager:
             settlement = _resolve_settlement_price(market, outcome)
             logger.info("⚖️ [结算] %s outcome=%s 过期结算价=%.1f¢",
                         market.get("slug","")[-16:], outcome.get("label","?"), settlement * 100)
-            if settlement <= 0:
+            if settlement <= 0 and not _market_settled(market):
                 # Oracle 尚未结算, 跳过本轮, 下个 cycle 再试
+                logger.debug("或可结算: outcomePrices 未就绪, 跳过 (slug=%s)", market.get("slug","")[-16:])
                 return None, None
             return settlement, "EXPIRY_EXIT"
 
@@ -2181,7 +2175,7 @@ class TradingBotManager:
         # ============================================================
         # LowBuy-Double 阶段 — 中段低买翻倍 (跟 reversal 并行)
         # ============================================================
-        lowbuy_enabled = Config.get_bool("LOWBUY_ENABLED", "true")
+        lowbuy_enabled = Config.get_bool("lowbuy_enabled", "true")
         if lowbuy_enabled:
             # 先同步 lowbuy 引擎的 open positions (从 state.json 重新读,
             # 这样 bot 重启 / state 漂移后能自愈)
