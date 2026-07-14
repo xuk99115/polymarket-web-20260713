@@ -398,7 +398,12 @@ def _resolve_settlement_price(market: Dict[str, Any], outcome: Dict[str, Any],
                         # Oracle 还没结算, outcomePrices 是 stale 最后成交价.
                         # 返回 0.0 让调用方走延迟结算 (pending_settle), 等 oracle.
                         settlement = 0.0
+                    elif not _market_settled(market):
+                        # sp < 0.5 且 oracle 还没结算: stale 价, 不拿来结算.
+                        # 等 oracle 出结果后 (0.0/1.0), 留多个 cycle 重试.
+                        settlement = 0.0
                     else:
+                        # oracle 已结算, sp 靠近 0.0 (输家归零)
                         settlement = sp
             except (ValueError, TypeError):
                 pass
@@ -1237,15 +1242,18 @@ class TradingBotManager:
                 pos_label = "双边无风险" if hold_to_expiry else ""
                 # tp_target 从 engine.register_entry 里拿 (engine 里算的是 entry_price * LOWBUY_TP_MULT)
                 tp_target = position.get("tp_target", ask_price * LOWBUY_TP_MULT)
+                strategy_label = "FVEdge" if signal_source == "fv_edge" else "LowBuy"
                 logger.info(
-                    "%s [LowBuy] 开仓: %s @ %.1f¢, stake=$%.2f, TP=%.1f¢",
+                    "%s [%s] 开仓: %s @ %.1f¢, stake=$%.2f, TP=%.1f¢",
                     "🟢" if hold_to_expiry else "💰",
+                    strategy_label,
                     outcome.get("label"), ask_price * 100, stake, tp_target * 100,
                 )
-                return f"LowBuy 开仓 {outcome.get('label')} @ {ask_price*100:.1f}¢ (${stake})"
+                return f"{strategy_label} 开仓 {outcome.get('label')} @ {ask_price*100:.1f}¢ (${stake})"
         except Exception as exc:
-            logger.error("[LowBuy] 开仓失败: %s", exc)
-            return f"LowBuy 开仓失败: {exc}"
+            strategy_label = "FVEdge" if signal_source == "fv_edge" else "LowBuy"
+            logger.error("[%s] 开仓失败: %s", strategy_label, exc)
+            return f"{strategy_label} 开仓失败: {exc}"
         return None
 
     async def _open_lowbuy_live_position(
@@ -1662,10 +1670,13 @@ class TradingBotManager:
         返回新 position dict (已经 add 到 state.positions 但未 save).
         """
         try:
+            # 确定策略标签（用于日志）
+            _tag = (signal or {}).get("source") or "lowbuy_double"
+            strategy_label = "FVEdge" if _tag == "fv_edge" else "LowBuy"
             # 构造 position
             shares = round(stake_usd / entry_price, 4) if entry_price > 0 else 0
             if shares <= 0:
-                logger.warning("[LowBuy] shares<=0: stake=$%.2f entry=%.2f", stake_usd, entry_price)
+                logger.warning("[%s] shares<=0: stake=$%.2f entry=%.2f", strategy_label, stake_usd, entry_price)
                 return None
 
             # 2026-07-11: 跟随 signal.source 决定 strategy 标签, 让 fv_edge
@@ -1715,7 +1726,7 @@ class TradingBotManager:
             state = self.state_manager.get_state()
             cash = safe_float(state.get("cash_balance"), 0.0) or 0.0
             if cash < stake_usd:
-                logger.warning("[LowBuy] 资金不足, 跳过开仓: cash=$%.2f < stake=$%.2f", cash, stake_usd)
+                logger.warning("[%s] 资金不足, 跳过开仓: cash=$%.2f < stake=$%.2f", strategy_label, cash, stake_usd)
                 return None
             state["cash_balance"] = round(cash - stake_usd, 4)
 
@@ -1742,7 +1753,7 @@ class TradingBotManager:
                 "price": entry_price,
                 "status": "OPEN",
                 "tp_target": tp_target,
-                "reason": signal.get("reason") or f"[LowBuy] 震荡入场, TP={tp_target * 100:.1f}¢",
+                "reason": signal.get("reason") or f"[{strategy_label}] 震荡入场, TP={tp_target * 100:.1f}¢",
                 "strategy": strategy_tag,
                 "source": strategy_tag,
                 "entry_mte": signal.get("entry_mte"),
@@ -1763,12 +1774,13 @@ class TradingBotManager:
             trades.append(trade_record)
 
             logger.info(
-                "📝 [LowBuy] state.json 写入: id=%s, slug=%s, shares=%.2f, stake=$%.2f",
+                "📝 [%s] state.json 写入: id=%s, slug=%s, shares=%.2f, stake=$%.2f",
+                strategy_label,
                 position["id"][:20], position["market_slug"], shares, stake_usd,
             )
             return position
         except Exception as exc:
-            logger.error("[LowBuy] _open_lowbuy_position 失败: %s", exc)
+            logger.error("[%s] _open_lowbuy_position 失败: %s", strategy_label, exc)
             return None
 
     # ============================================================
@@ -1858,6 +1870,12 @@ class TradingBotManager:
                             # Bug fix 2026-07-01: redeem-aware — 赢家按 1.0 USD/share 结算
                             if bid_price >= 0.5 and _market_settled(market):
                                 bid_price = 1.0
+                            elif bid_price >= 0.5:
+                                # Oracle 还没结算, stale 价, 跳过
+                                continue
+                            elif not _market_settled(market):
+                                # Oracle 还没结算, stale 价 (<0.5), 跳过
+                                continue
                             pnl = (bid_price - entry_price) * shares
                             t["status"] = "TIME_STOP"
                             t["closed_at"] = now_utc.isoformat()
