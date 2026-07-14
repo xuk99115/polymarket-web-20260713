@@ -765,6 +765,14 @@ class TradingBotManager:
                 is_closed = is_closed or seconds_to_end <= 0
             except Exception:
                 pass
+        # 兜底: 从 slug 时间戳算过期 (BTC 15m 窗口 slug 含开始时间)
+        if not is_closed:
+            slug_start = self._slug_start_dt(position.get("market_slug") or market.get("slug", ""))
+            if slug_start:
+                # BTC 15m 窗口持续 15 分钟
+                slug_end = slug_start + timedelta(minutes=15)
+                if now_utc >= slug_end:
+                    is_closed = True
 
         if self.current_mode == "live":
             if is_closed:
