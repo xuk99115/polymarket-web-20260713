@@ -667,10 +667,12 @@ class TradingBotManager:
             if status and status not in _CLOSED_TRADE_STATUSES and trade.get("closed_at") is None:
                 continue
             closed_trades.append(trade)
-        realized_pnl = round(sum(safe_float(t.get("realized_profit"), 0.0) or 0.0 for t in closed_trades), 4)
-        total_trades = len(closed_trades)
-        winning_trades = sum(1 for t in closed_trades if (safe_float(t.get("realized_profit"), 0.0) or 0.0) > 0)
-        losing_trades = sum(1 for t in closed_trades if (safe_float(t.get("realized_profit"), 0.0) or 0.0) < 0)
+        # 只算 SELL 侧 PnL, 避免 BUY+SELL 双重计数
+        sell_closed = [t for t in closed_trades if t.get("side") == "SELL"]
+        realized_pnl = round(sum(safe_float(t.get("realized_profit"), 0.0) or 0.0 for t in sell_closed), 4)
+        total_trades = len(sell_closed)
+        winning_trades = sum(1 for t in sell_closed if (safe_float(t.get("realized_profit"), 0.0) or 0.0) > 0)
+        losing_trades = sum(1 for t in sell_closed if (safe_float(t.get("realized_profit"), 0.0) or 0.0) < 0)
         paper_start = Config.get_float("PAPER_START_BALANCE", "100")
         cash_balance = round(safe_float(state.get("cash_balance"), 0.0) or 0.0, 4)
         expected_cash_balance = round(paper_start + realized_pnl, 4)
