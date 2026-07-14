@@ -790,6 +790,10 @@ class TradingBotManager:
         shares = safe_float(position.get("shares"), safe_float(position.get("size"), 0.0)) or 0.0
         pnl = shares * exit_price - stake
 
+        # FVEdge 策略: 持有到到期, 不走 TP/SL 提前平仓
+        if position.get("hold_to_expiry"):
+            return None, None
+
         take_profit_usd = (
             stake * Config.get_float("TAKE_PROFIT_PERCENT", "0.18")
             if self.current_mode == "live"
@@ -1703,6 +1707,7 @@ class TradingBotManager:
                 "btc_fetched_at": signal.get("btc_fetched_at"),
                 "btc_cache_age_secs": signal.get("btc_cache_age_secs"),
                 "code_version": "v2",
+                "hold_to_expiry": strategy_tag == "fv_edge",
             }
 
             # 扣现金前做余额防御。LowBuy 走直写 state 路径, 不经过 PaperExecutor.open_position()
@@ -1753,6 +1758,7 @@ class TradingBotManager:
                 "btc_fetched_at": signal.get("btc_fetched_at"),
                 "btc_cache_age_secs": signal.get("btc_cache_age_secs"),
                 "code_version": "v2",
+                "hold_to_expiry": strategy_tag == "fv_edge",
             }
             trades.append(trade_record)
 
