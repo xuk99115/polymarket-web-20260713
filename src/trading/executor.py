@@ -175,7 +175,8 @@ class PaperExecutor(BaseExecutor):
             buy_trade["status"] = exit_reason
             buy_trade["closed_at"] = now_utc
             buy_trade["close_price"] = exit_price
-            buy_trade["realized_profit"] = profit
+            # 注意: 不设 realized_profit, 利润由下面新建的 SELL trade 承载,
+            # 避免 _refresh_summary 双重计数 (BUY + SELL 各算一次 PnL).
 
         # 更新统计数据
         stats = state.setdefault("stats", {"total_trades": 0, "winning_trades": 0, "losing_trades": 0, "total_profit": 0.0})
