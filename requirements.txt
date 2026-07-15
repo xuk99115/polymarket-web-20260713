@@ -1,0 +1,7 @@
+aiohttp>=3.9.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+py-clob-client>=0.30.0,<0.40.0
+websockets>=13.0        # Polymarket CLOB WebSocket (实时盘口)
+python-socks>=2.7.0     # binance BTC 价格 SOCKS5 代理必需 (PySocks style)
+aiohttp-socks>=0.9.0    # aiohttp SOCKS5 代理 (market.py 导入 aiohttp_socks)

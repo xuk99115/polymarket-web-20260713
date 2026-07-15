@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Polymarket 通用盘口交易控制台</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Orbitron:wght@500;700;800&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="status.css?v=20260703f">
+</head>
+<body>
+    <div class="app-bg">
+        <div class="bg-grid"></div>
+        <div class="bg-glow bg-glow-a"></div>
+        <div class="bg-glow bg-glow-b"></div>
+        <div class="bg-glow bg-glow-c"></div>
+    </div>
+
+    <!-- ========= 顶栏 ========= -->
+    <header class="topbar">
+        <div class="topbar-left">
+            <div class="brand-lockup">
+                <span class="brand-kicker">Manual Market Focus / Binary Market V1</span>
+                <div class="brand-line">
+                    <span class="status-dot" id="status-dot"></span>
+                    <span class="topbar-title">Polymarket 通用盘口交易控制台</span>
+                    <span class="status-label" id="status-label">连接中...</span>
+                </div>
+            </div>
+        </div>
+        <div class="topbar-right">
+            <div class="topbar-controls">
+                <div class="account-switch topbar-switch">
+                    <button class="switch-btn active" id="switch-paper" onclick="setAccountMode('paper')">模拟账户</button>
+                    <button class="switch-btn" id="switch-real" onclick="setAccountMode('real')">真实账户</button>
+                </div>
+                <button class="trade-toggle-btn enabled compact-toggle" id="trade-toggle-btn" onclick="toggleTrading()">交易已开启</button>
+                <span class="status-label mini-view-badge" id="view-badge">模拟账户视图</span>
+            </div>
+            <div class="time-chip">
+                <span class="time-chip-label">Last Sync</span>
+                <span class="update-time" id="update-time">--:--:--</span>
+            </div>
+            <button id="open-settings" class="settings-btn" title="系统设置">⚙️</button>
+            <button class="refresh-btn" id="refresh-btn" onclick="refreshAll()" title="刷新">⟳</button>
+        </div>
+    </header>
+
+    <!-- ========= 主体 ========= -->
+    <main class="main-grid">
+        <!-- ========= 左列 ========= -->
+        <div class="col-left">
+            <!-- 三个指标卡 -->
+            <div class="metrics-row" id="metrics-row">
+                <div class="metric-card balance-card" id="paper-balance-card">
+                    <div class="metric-label">模拟账户权益</div>
+                    <div class="metric-value mono" id="usdc-balance">--</div>
+                    <div class="metric-sub" id="balance-status">查询中</div>
+                </div>
+                <div class="metric-card asset-change-card" id="asset-change-card">
+                    <div class="metric-label">资产变化</div>
+                    <div class="metric-value mono" id="asset-change-value">--</div>
+                    <div class="metric-sub" id="asset-change-sub">等待模拟结果</div>
+                    <div class="metric-sub" id="trade-stats" style="margin-top:6px;font-size:0.85em;opacity:0.7">--</div>
+                </div>
+                <div class="metric-card wallet-card" id="real-balance-card">
+                    <div class="metric-label">真实钱包现金</div>
+                    <div class="metric-value mono" id="real-usdc-balance">--</div>
+                    <div class="metric-sub" id="real-balance-status">查询中</div>
+                </div>
+                <div class="metric-card price-card">
+                    <div class="metric-label">参考 BTC 价格</div>
+                    <div class="metric-value mono" id="btc-price">--</div>
+                    <div class="metric-sub" id="btc-change">--</div>
+                    <div class="btc-trend-grid" id="btc-trend-grid">
+                        <div class="btc-trend-cell"><span class="btc-trend-label">1m</span><span class="btc-trend-val mono" id="btc-1m">--</span></div>
+                        <div class="btc-trend-cell"><span class="btc-trend-label">3m</span><span class="btc-trend-val mono" id="btc-3m">--</span></div>
+                        <div class="btc-trend-cell"><span class="btc-trend-label">5m</span><span class="btc-trend-val mono" id="btc-5m">--</span></div>
+                        <div class="btc-trend-cell"><span class="btc-trend-label">15m</span><span class="btc-trend-val mono" id="btc-15m">--</span></div>
+                    </div>
+                    <div class="btc-trend-foot">
+                        <span>区间 <span class="mono" id="btc-range-low">--</span> → <span class="mono" id="btc-range-high">--</span></span>
+                        <span>位置 <span class="mono" id="btc-range-pos">--</span></span>
+                    </div>
+                    <canvas id="btc-sparkline" class="btc-sparkline"></canvas>
+                </div>
+                <div class="metric-card signal-card">
+                    <div class="metric-label">FV 信号</div>
+                    <div class="metric-value" id="ai-prediction">--</div>
+                    <div class="metric-sub" id="ai-label">等待信号</div>
+                </div>
+            </div>
+
+            <!-- 资金分布与绩效 -->
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">资产分配与历史绩效</span>
+                    <span class="panel-badge" id="session-duration">00h 00m</span>
+                </div>
+                <div class="panel-caption">实时分析资金占用情况及本轮测试的绩效表现。</div>
+                <div class="capital-wrap">
+                    <div class="asset-alloc-stats">
+                        <div class="alloc-item">
+                            <span class="alloc-dot dot-cash"></span>
+                            <span class="alloc-label">可用现金:</span>
+                            <span class="alloc-val mono" id="asset-cash-val">$0.00</span>
+                        </div>
+                        <div class="alloc-item">
+                            <span class="alloc-dot dot-reserved"></span>
+                            <span class="alloc-label">仓位占用:</span>
+                            <span class="alloc-val mono" id="asset-reserved-val">$0.00</span>
+                        </div>
+                    </div>
+                    <div class="asset-bar-container">
+                        <div class="asset-bar-rail">
+                            <div class="asset-bar-fill cash" id="bar-cash" style="width: 100%"></div>
+                            <div class="asset-bar-fill reserved" id="bar-reserved" style="width: 0%"></div>
+                        </div>
+                    </div>
+
+                    <div class="perf-stats-grid">
+                        <div class="perf-stat-box">
+                            <span class="perf-label">胜率 (Win Rate)</span>
+                            <span class="perf-val mono c-green" id="perf-win-rate">0.0%</span>
+                        </div>
+                        <div class="perf-stat-box">
+                            <span class="perf-label">成交次数</span>
+                            <span class="perf-val mono" id="perf-trade-count">0</span>
+                        </div>
+                        <div class="perf-stat-box">
+                            <span class="perf-label">累计 ROI</span>
+                            <span class="perf-val mono" id="perf-roi">0.00%</span>
+                        </div>
+                        <div class="perf-stat-box">
+                            <span class="perf-label">预估利润</span>
+                            <span class="perf-val mono" id="perf-profit-val">$0.00</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 最近交易 -->
+            <div class="panel flex-grow trade-panel">
+                <div class="panel-header">
+                    <span class="panel-title" id="trade-panel-title">全部模拟交易流水</span>
+                    <span class="panel-badge" id="trade-count">0 笔</span>
+                </div>
+                <div class="panel-caption" id="trade-panel-caption">完整展示这轮测试的全部交易记录，包含开仓、平仓、盈利/亏损和每一步的操作说明。</div>
+                <div class="trade-toolbar">
+                    <div class="trade-toolbar-stats">
+                        <div class="trade-stat-chip">
+                            <span>进行中</span>
+                            <strong class="mono" id="trade-open-count">0</strong>
+                        </div>
+                        <div class="trade-stat-chip">
+                            <span>已平仓</span>
+                            <strong class="mono" id="trade-closed-count">0</strong>
+                        </div>
+                        <div class="trade-stat-chip">
+                            <span>累计已实现</span>
+                            <strong class="mono" id="trade-realized-pnl">$0.00</strong>
+                        </div>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table class="data-table">
+                        <colgroup>
+                            <col class="trade-col-time">
+                            <col class="trade-col-strategy">
+                            <col class="trade-col-direction">
+                            <col class="trade-col-status">
+                            <col class="trade-col-shares">
+                            <col class="trade-col-entry">
+                            <col class="trade-col-exit">
+                            <col class="trade-col-result">
+                            <col class="trade-col-market">
+                            <col class="trade-col-action">
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th>时间</th>
+                                <th>策略</th>
+                                <th>方向</th>
+                                <th>状态</th>
+                                <th>份数</th>
+                                <th>入场价</th>
+                                <th>平仓价</th>
+                                <th>结果</th>
+                                <th>盘口</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="trades-body">
+                            <tr><td colspan="10" class="empty-row">暂无交易记录</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- ========= 右列 ========= -->
+        <div class="col-right">
+            <!-- Order Book (已上移到首位) -->
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">聚焦盘口深度</span>
+                </div>
+                <div class="panel-caption">当前目标盘口的真实买卖深度；V1 版本先支持手动指定的二元盘口。</div>
+                <div class="orderbook-grid" id="orderbook-grid">
+                    <div class="empty-row">Loading order book...</div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title" id="position-panel-title">当前模拟持仓</span>
+                    <span class="panel-badge" id="position-count">0 仓</span>
+                </div>
+                <div class="panel-caption" id="position-panel-caption">每个盘口 1U；默认只看摘要，点开后再看入场 ask、当前 bid、点差和到期时间。</div>
+                <div class="order-list" id="order-list">
+                    <div class="empty-row">暂无模拟持仓</div>
+                </div>
+            </div>
+
+            <!-- 套利对子 (已移除 2026-06-25) -->
+
+            <!-- Fair Value 模型 -->
+            <div class="panel" id="fair-panel">
+                <div class="panel-header">
+                    <span class="panel-title">Fair Value 模型 (BTC 15m)</span>
+                    <span class="panel-badge" id="fair-direction-badge">--</span>
+                </div>
+                <div class="panel-caption">log-normal 价格模型 + 15m σ。Fair vs Market 的 edge 以 bps 显示，正值 = 市场低估 UP，负值 = 市场低估 DOWN。</div>
+                <div class="fair-grid">
+                    <div class="fair-cell fair-main">
+                        <span class="fair-label">Fair UP</span>
+                        <span class="fair-value mono" id="fair-up">--</span>
+                    </div>
+                    <div class="fair-cell fair-main">
+                        <span class="fair-label">Fair DOWN</span>
+                        <span class="fair-value mono" id="fair-down">--</span>
+                    </div>
+                    <div class="fair-cell">
+                        <span class="fair-label">Z-score</span>
+                        <span class="fair-value mono" id="fair-z">--</span>
+                    </div>
+                    <div class="fair-cell">
+                        <span class="fair-label">σ (15m)</span>
+                        <span class="fair-value mono" id="fair-sigma">--</span>
+                    </div>
+                    <div class="fair-cell fair-edge-cell">
+                        <span class="fair-label">Edge vs Market</span>
+                        <span class="fair-value mono" id="fair-edge">--</span>
+                        <span class="fair-sub" id="fair-edge-sub">等待市场数据</span>
+                    </div>
+                    <div class="fair-cell">
+                        <span class="fair-label">Ref Price</span>
+                        <span class="fair-value mono" id="fair-ref">--</span>
+                    </div>
+                </div>
+                <div class="fair-bar-wrap">
+                    <div class="fair-bar-track">
+                        <div class="fair-bar-fill fair-bar-up" id="fair-bar-up"></div>
+                        <div class="fair-bar-fill fair-bar-down" id="fair-bar-down"></div>
+                    </div>
+                    <div class="fair-bar-legend">
+                        <span class="c-green">UP <strong id="fair-bar-up-label">--</strong></span>
+                        <span class="c-red">DOWN <strong id="fair-bar-down-label">--</strong></span>
+                    </div>
+                </div>
+                <div class="fv-training-strip" id="fv-training-strip">
+                    <span class="fv-training-pill">训练模式: <strong id="fv-train-enabled">--</strong></span>
+                    <span class="fv-training-pill">策略: <strong>FV Edge</strong></span>
+                    <span class="fv-training-pill">samples: <strong id="fv-samples">--</strong></span>
+                    <span class="fv-training-pill">refs: <strong id="fv-refs">--</strong></span>
+                    <span class="fv-training-pill">当前ref: <strong id="fv-current-ref">--</strong></span>
+                    <span class="fv-training-pill">late_ref: <strong id="fv-late-ref">--</strong></span>
+                </div>
+            </div>
+
+            <!-- Kronos 主信号已移除 (2026-06-25) -->
+
+            <!-- Bot 配置 -->
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">脚本参数</span>
+                </div>
+                <div class="panel-caption">当前页面展示的是运行中的目标市场、策略模板和执行阈值。</div>
+                <div class="config-grid" id="config-grid">
+                    <div class="cfg-row"><span>交易模式</span><span class="mono" id="cfg-mode">--</span></div>
+                    <div class="cfg-row"><span>目标市场</span><span class="mono" id="cfg-daily-open">--</span></div>
+                    <div class="cfg-row"><span>市场到期</span><span class="mono" id="cfg-current">--</span></div>
+                    <div class="cfg-row"><span>下注金额</span><span class="mono" id="cfg-bet">--</span></div>
+                    <div class="cfg-row"><span>可用现金</span><span class="mono" id="cfg-max">--</span></div>
+                    <div class="cfg-row"><span>策略模板</span><span class="mono" id="cfg-diff">--</span></div>
+                    <div class="cfg-row"><span>最大点差</span><span class="mono" id="cfg-spread">--</span></div>
+                    <div class="cfg-row"><span>目标盘口</span><span class="mono" id="cfg-depth">--</span></div>
+                    <div class="cfg-row"><span>最小 Edge</span><span class="mono" id="cfg-tp">--</span></div>
+                    <div class="cfg-row"><span>当前开仓</span><span class="mono" id="cfg-open-positions">--</span></div>
+                    <div class="cfg-row"><span>占用资金</span><span class="mono" id="cfg-reserved">--</span></div>
+                    <div class="cfg-row"><span>执行规则</span><span class="mono" id="cfg-sl">--</span></div>
+                    <div class="cfg-row"><span>模拟盈亏</span><span class="mono" id="cfg-paper-profit">--</span></div>
+                    <div class="cfg-row"><span>当前账户</span><span class="mono" id="cfg-wallet">--</span></div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- ========= 设置模态框 ========= -->
+    <div id="settings-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>系统运行设置</h3>
+                <button class="close-modal" id="close-settings">×</button>
+            </div>
+            <div class="modal-body">
+
+                <!-- ① 运行模式 -->
+                <div class="setting-group">
+                    <label class="setting-label">运行模式</label>
+                    <div class="mode-selector">
+                        <div class="mode-item active" data-mode="paper_live">
+                            <span class="mode-title">模拟 (Paper)</span>
+                            <span class="mode-desc">虚拟资金，无需私钥</span>
+                        </div>
+                        <div class="mode-item" data-mode="live">
+                            <span class="mode-title">实盘 (Live)</span>
+                            <span class="mode-desc">真钱下单，需全部凭证</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ② Polymarket 交易凭证 -->
+                <div class="setting-group">
+                    <label class="setting-label">
+                        Polymarket 交易凭证
+                        <a class="setting-link" href="https://polymarket.com/settings" target="_blank">开发者设置 →</a>
+                    </label>
+                    <div class="setting-hint">在 Polymarket → 设置 → API Keys 页面生成；模拟模式也需要前三项（用于查询持仓）。</div>
+                    <div class="input-stack">
+                        <div class="input-labeled">
+                            <span class="input-tag required">必填</span>
+                            <input type="text" id="cfg-input-api-key" placeholder="API Key（形如 019d8b3c-...）" autocomplete="off">
+                        </div>
+                        <div class="input-labeled">
+                            <span class="input-tag required">必填</span>
+                            <input type="password" id="cfg-input-api-secret" placeholder="API Secret（Base64 字符串）" autocomplete="off">
+                        </div>
+                        <div class="input-labeled">
+                            <span class="input-tag required">必填</span>
+                            <input type="password" id="cfg-input-api-pass" placeholder="API Passphrase（64位十六进制）" autocomplete="off">
+                        </div>
+                        <div class="input-labeled">
+                            <span class="input-tag live-only">实盘</span>
+                            <input type="password" id="cfg-input-private-key" placeholder="EOA 私钥（0x 开头，64位十六进制）" autocomplete="off">
+                        </div>
+                        <div class="input-labeled">
+                            <span class="input-tag live-only">实盘</span>
+                            <input type="text" id="cfg-input-funder" placeholder="Funder 地址（开发者页面的钱包地址，非充值地址）" autocomplete="off">
+                        </div>
+                    </div>
+                    <div class="setting-hint hint-warn">⚠ 私钥仅存于本机 .env 文件，不会上传任何服务器。</div>
+                </div>
+
+                <!-- ③ FV Edge 参数 -->
+                <div class="setting-group">
+                    <label class="setting-label">FV Edge 参数</label>
+                    <div class="input-grid-5">
+                        <div class="input-field">
+                            <span class="input-field-label">单笔仓位 (USDC)</span>
+                            <input type="number" id="cfg-input-position" step="0.1" min="0.1" placeholder="2.0">
+                        </div>
+                        <div class="input-field">
+                            <span class="input-field-label">最小 Edge (bps)</span>
+                            <input type="number" id="cfg-input-edge" step="10" min="0" placeholder="300">
+                        </div>
+                        <div class="input-field">
+                            <span class="input-field-label">最晚入场 (分钟)</span>
+                            <input type="number" id="cfg-input-mte" step="0.1" min="0.1" max="15" placeholder="2.0">
+                        </div>
+                        <div class="input-field">
+                            <span class="input-field-label">最大持仓</span>
+                            <input type="number" id="cfg-input-max-positions" step="1" min="1" max="20" placeholder="1">
+                        </div>
+                        <div class="input-field">
+                            <span class="input-field-label">BTC 最大延迟 (秒)</span>
+                            <input type="number" id="cfg-input-btc-age" step="1" min="1" max="60" placeholder="10">
+                        </div>
+                    </div>
+                    <div class="setting-hint">策略固定扫描 BTC 15m 市场，只在独立计算后的正 edge 达标时入场，并持有到期。</div>
+                </div>
+
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel" id="cancel-settings">取消</button>
+                <button class="btn-save" id="save-settings">保存并应用</button>
+            </div>
+        </div>
+    </div>
+
+
+        <style>
+        /* BTC 趋势 panel */
+        .btc-trend-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 4px;
+            margin-top: 8px;
+            padding: 6px 0;
+            border-top: 1px solid rgba(120, 150, 220, 0.15);
+        }
+        .btc-trend-cell {
+            display: flex; flex-direction: column; align-items: center; gap: 2px;
+        }
+        .btc-trend-label {
+            font-size: 10px; color: #7a87a8; text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .btc-trend-val { font-size: 13px; font-weight: 600; }
+        .btc-trend-val.c-green { color: #5fd99a; }
+        .btc-trend-val.c-red { color: #ff7a8e; }
+        .btc-trend-val.c-mute { color: #7a87a8; }
+        .btc-trend-foot {
+            display: flex; justify-content: space-between;
+            margin-top: 6px; font-size: 10px; color: #6f7a9a;
+        }
+        .btc-trend-foot .mono { color: #aab4d4; font-size: 11px; }
+        .btc-sparkline {
+            display: block;
+            width: 100%;
+            height: 40px;
+            margin-top: 6px;
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.02);
+        }
+    </style>
+
+    <script type="module" src="js/app.js?v=20260707c"></script>
+</body>
+</html>
