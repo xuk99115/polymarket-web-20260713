@@ -14,6 +14,12 @@ from typing import Any, Dict, Optional
 BASE_DIR = Path(__file__).parent.parent.parent.absolute()
 DATA_DIR = os.path.join(BASE_DIR, "data")
 DOCS_DIR = os.path.join(BASE_DIR, "docs")
+
+# 双目录架构：运行时写临时卷，定时同步到永久卷
+# RUNTIME_DIR: 容器临时卷 /tmp — 零 EIO 风险
+# PERSIST_DIR: 永久卷 — 断电不丢
+RUNTIME_DIR = os.environ.get("RUNTIME_DIR", "/tmp/polymarket-fv-edge/data")
+PERSIST_DIR = os.environ.get("PERSIST_DIR", os.path.join(str(BASE_DIR), "data"))
 STATUS_FILE = os.path.join(DATA_DIR, "bot_status.json")
 PAPER_STATE_FILE = os.path.join(DATA_DIR, "paper_trade_state.json")
 REPORT_FILE = os.path.join(DOCS_DIR, "paper_trade_report.md")

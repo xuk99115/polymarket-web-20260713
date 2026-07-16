@@ -5,6 +5,7 @@ import math
 import os
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..api.fair_value import (
@@ -86,14 +87,24 @@ class _SaveBatchContext:
 class TradingBotManager:
     """FV Edge-only trading loop for BTC 15-minute markets."""
 
-    BTC_SNAPSHOT_FILE = os.path.join(DATA_DIR, "btc_snapshot.json")
-    BTC_WINDOW_REFS_FILE = os.path.join(DATA_DIR, "btc_window_refs.json")
-    # 预测记录和 ticks 放在 tmpfs 避免 overlay/FUSE EIO 错误
-    _RUNTIME_DIR = "/tmp/polymarket_runtime"
+    # ================================================================
+    # 双目录架构：核心状态写永久卷，日志写临时卷
+    # RUNTIME_DIR: 容器临时卷 — 零 EIO，断电丢失可接受
+    # PERSIST_DIR: 永久卷 — 断电不丢
+    # ================================================================
+    _RUNTIME_DIR = os.environ.get("RUNTIME_DIR", "/tmp/polymarket-fv-edge/data")
+    _PERSIST_DIR = os.environ.get("PERSIST_DIR", os.path.join(str(Path(__file__).resolve().parents[2]), "data"))
     os.makedirs(_RUNTIME_DIR, exist_ok=True)
+    os.makedirs(_PERSIST_DIR, exist_ok=True)
+
+    # 核心状态 → 永久卷（断电不丢）
+    BTC_SNAPSHOT_FILE = os.path.join(_PERSIST_DIR, "btc_snapshot.json")
+    BTC_WINDOW_REFS_FILE = os.path.join(_PERSIST_DIR, "btc_window_refs.json")
+    POSITION_AUDIT_FILE = os.path.join(_PERSIST_DIR, "position_audit.jsonl")
+
+    # 日志型数据 → 临时卷（EIO 无害）
     BTC_TICKS_FILE = os.path.join(_RUNTIME_DIR, "btc_ticks.jsonl")
     FAIR_VALUE_PREDICTIONS_FILE = os.path.join(_RUNTIME_DIR, "fair_value_predictions.jsonl")
-    POSITION_AUDIT_FILE = os.path.join(DATA_DIR, "position_audit.jsonl")
 
     def __init__(self):
         self.state_manager = StateManager(PAPER_STATE_FILE)
