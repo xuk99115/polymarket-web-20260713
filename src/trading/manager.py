@@ -88,8 +88,11 @@ class TradingBotManager:
 
     BTC_SNAPSHOT_FILE = os.path.join(DATA_DIR, "btc_snapshot.json")
     BTC_WINDOW_REFS_FILE = os.path.join(DATA_DIR, "btc_window_refs.json")
-    BTC_TICKS_FILE = os.path.join(DATA_DIR, "btc_ticks.jsonl")
-    FAIR_VALUE_PREDICTIONS_FILE = os.path.join(DATA_DIR, "fair_value_predictions.jsonl")
+    # 预测记录和 ticks 放在 tmpfs 避免 overlay/FUSE EIO 错误
+    _RUNTIME_DIR = "/tmp/polymarket_runtime"
+    os.makedirs(_RUNTIME_DIR, exist_ok=True)
+    BTC_TICKS_FILE = os.path.join(_RUNTIME_DIR, "btc_ticks.jsonl")
+    FAIR_VALUE_PREDICTIONS_FILE = os.path.join(_RUNTIME_DIR, "fair_value_predictions.jsonl")
     POSITION_AUDIT_FILE = os.path.join(DATA_DIR, "position_audit.jsonl")
 
     def __init__(self):

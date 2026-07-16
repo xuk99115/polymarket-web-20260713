@@ -81,20 +81,26 @@ class ChainlinkRTDSClient:
     async def get_latest(self) -> Optional[Dict[str, Any]]:
         now = asyncio.get_running_loop().time()
         if self._latest is not None and now - self._fetched_at <= self.cache_seconds:
+            logger.debug("Chainlink RTDS returning cached price (age=%.1fs)", now - self._fetched_at)
             return dict(self._latest)
         async with self._lock:
             now = asyncio.get_running_loop().time()
             if self._latest is not None and now - self._fetched_at <= self.cache_seconds:
+                logger.debug("Chainlink RTDS returning cached price (race, age=%.1fs)", now - self._fetched_at)
                 return dict(self._latest)
+            logger.info("Chainlink RTDS fetching fresh price...")
             tick = await self._fetch_snapshot()
             if tick is None:
+                logger.warning("Chainlink RTDS fetch returned None")
                 return None
             tick["fetched_at"] = datetime.now(timezone.utc).isoformat()
             self._latest = tick
             self._fetched_at = asyncio.get_running_loop().time()
+            logger.info("Chainlink RTDS price fetched: $%.2f, captured_at=%s", tick.get("price", 0), tick.get("captured_at", "?"))
             return dict(tick)
 
     async def _fetch_snapshot(self) -> Optional[Dict[str, Any]]:
+        logger.info("Chainlink RTDS connecting to %s...", RTDS_URL)
         subscription = {
             "action": "subscribe",
             "subscriptions": [{
@@ -110,14 +116,20 @@ class ChainlinkRTDSClient:
                 close_timeout=1,
                 ping_interval=20,
             ) as socket:
+                logger.info("Chainlink RTDS WebSocket connected, subscribing...")
                 await socket.send(json.dumps(subscription))
+                logger.info("Chainlink RTDS subscribed, waiting for snapshot (timeout=%.1fs)...", self.timeout_seconds)
                 deadline = asyncio.get_running_loop().time() + self.timeout_seconds
+                frames_received = 0
                 while asyncio.get_running_loop().time() < deadline:
                     remaining = max(0.1, deadline - asyncio.get_running_loop().time())
                     frame = await asyncio.wait_for(socket.recv(), timeout=remaining)
+                    frames_received += 1
                     tick = parse_latest_tick(frame, now_ms=int(datetime.now(timezone.utc).timestamp() * 1000))
                     if tick is not None:
+                        logger.info("Chainlink RTDS parsed tick #%d: $%.2f", frames_received, tick.get("price", 0))
                         return tick
+                logger.warning("Chainlink RTDS received %d frames but no valid tick", frames_received)
         except (asyncio.TimeoutError, OSError, ValueError, websockets.WebSocketException) as exc:
             logger.warning("Chainlink RTDS snapshot unavailable: %s", exc)
         return None
