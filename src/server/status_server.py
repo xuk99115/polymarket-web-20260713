@@ -737,6 +737,17 @@ class StatusHandler(http.server.SimpleHTTPRequestHandler):
             report = state.get("report", {})
             summary = state.get("summary", {})
             control = _load_control_for_instance(ctx)
+            # 优先读独立 summary 快照
+            state_file = ctx.get("state_file", "")
+            summary_file = os.path.join(os.path.dirname(state_file), "state_summary.json") if state_file else ""
+            if summary_file and os.path.exists(summary_file):
+                try:
+                    with open(summary_file, "r", encoding="utf-8") as f:
+                        snap = json.load(f)
+                    if snap:
+                        summary = snap
+                except Exception:
+                    pass
             # 合并 control.json 覆盖的键
             def _env(key, default=""):
                 return _instance_env(ctx, control, key, default)
