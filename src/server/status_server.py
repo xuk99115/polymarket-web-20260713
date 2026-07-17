@@ -178,7 +178,14 @@ def _build_balance_payload(ctx: dict, state: dict) -> dict:
     state_file = ctx.get("state_file", "")
     summary_file = os.path.join(os.path.dirname(state_file), "state_summary.json") if state_file else ""
     if summary_file and os.path.exists(summary_file):
-        summary = load_json_file(summary_file, summary) or summary
+        # 直接读快照，不走 copy 逻辑（overlay copy2 可能失败）
+        try:
+            with open(summary_file, "r", encoding="utf-8") as f:
+                snap = json.load(f)
+            if snap:
+                summary = snap
+        except Exception:
+            pass
     return {
         "balance": summary.get("ending_balance", float(_instance_env(ctx, _load_control_for_instance(ctx), "PAPER_START_BALANCE", "100"))),
         "wallet": state.get("wallet") or _instance_env(ctx, _load_control_for_instance(ctx), "PAPER_WALLET_LABEL", "LOCAL-SIM"),
@@ -199,9 +206,14 @@ def _build_config_payload(ctx: dict, state: dict, bot_status: dict) -> dict:
     state_file = ctx.get("state_file", "")
     summary_file = os.path.join(os.path.dirname(state_file), "state_summary.json") if state_file else ""
     if summary_file and os.path.exists(summary_file):
-        snap = load_json_file(summary_file, None)
-        if snap:
-            summary = snap
+        # 直接读快照，不走 copy 逻辑（overlay copy2 可能失败）
+        try:
+            with open(summary_file, "r", encoding="utf-8") as f:
+                snap = json.load(f)
+            if snap:
+                summary = snap
+        except Exception:
+            pass
     return {
         "instance_key": ctx.get("key"),
         "instance_label": ctx.get("label"),
