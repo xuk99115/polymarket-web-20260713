@@ -24,11 +24,24 @@ def save_json_file(path: str, data: Any):
             try:
                 os.fsync(f.fileno())
             except OSError as exc:
-                # Some FUSE filesystems do not implement fsync; real I/O
-                # errors must still abort the atomic write and be visible.
                 if exc.errno not in {errno.EINVAL, errno.ENOTSUP, errno.EOPNOTSUPP}:
                     raise
         os.replace(tmp_path, path)
+    except FileNotFoundError:
+        # .tmp 文件在 os.replace 前被清掉了（overlay/FUSE 竞态条件）
+        # Fallback: 直接写入目标文件
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except OSError:
+                pass
+        # 清理残留 .tmp
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
     except Exception:
         # 清理临时文件，避免堆积
         try:
