@@ -43,6 +43,14 @@ class StateManager:
     def flush(self):
         """强制把 dirty 状态落盘. batch 退出时调用."""
         if self._dirty:
+            # 先写 summary 快照（独立文件，status_server 优先读这个）
+            summary = self.state.get("summary", {})
+            if summary:
+                summary_file = os.path.join(os.path.dirname(self.state_file), "state_summary.json")
+                try:
+                    save_json_file(summary_file, summary)
+                except Exception:
+                    pass
             save_json_file(self.state_file, self.state)
             self._dirty = False
 

@@ -518,17 +518,6 @@ class TradingBotManager:
             "result": "running",
             "session_started_at": state.get("session_started_at"),
         }
-
-        # 单独写 summary 快照，避免 status_server 读到不完整的 state file
-        self._write_summary_snapshot(state["summary"])
-
-    def _write_summary_snapshot(self, summary: Dict[str, Any]) -> None:
-        """写 summary 快照到独立文件，status_server 读这个而不是整个 state file。"""
-        summary_file = os.path.join(os.path.dirname(self.state_manager.state_file), "state_summary.json")
-        try:
-            save_json_file(summary_file, summary)
-        except Exception:
-            pass  # 非关键，不影响交易
         self.state_manager.save()
 
     @staticmethod
