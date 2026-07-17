@@ -174,6 +174,11 @@ def _build_positions_from_trades(trades: list) -> list:
 
 def _build_balance_payload(ctx: dict, state: dict) -> dict:
     summary = state.get("summary", {})
+    # 优先用独立 summary 快照（避免读到不完整的 state file）
+    state_file = ctx.get("state_file", "")
+    summary_file = os.path.join(os.path.dirname(state_file), "state_summary.json") if state_file else ""
+    if summary_file and os.path.exists(summary_file):
+        summary = load_json_file(summary_file, summary) or summary
     return {
         "balance": summary.get("ending_balance", float(_instance_env(ctx, _load_control_for_instance(ctx), "PAPER_START_BALANCE", "100"))),
         "wallet": state.get("wallet") or _instance_env(ctx, _load_control_for_instance(ctx), "PAPER_WALLET_LABEL", "LOCAL-SIM"),

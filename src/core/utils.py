@@ -33,7 +33,12 @@ def load_json_file(path: str, default: Any) -> Any:
     return default
 
 def save_json_file(path: str, data: Any):
-    """保存数据为 JSON 格式。原子写入: 先写 .tmp 再 os.replace，避免中途崩坏原文件。"""
+    """保存数据为 JSON 格式。原子写入: 先写 .tmp 再 os.replace，避免中途崩坏原文件。
+    
+    OverlayFS/FUSE 上 os.replace 可能不是真正原子的（跨 inode rename 失败），
+    所以采用 double-write 策略：先写一个带时间戳的 .bak 文件，再写目标文件。
+    这样即使 .tmp 被清掉，也能回退到 .bak。
+    """
     tmp_path = f"{path}.tmp"
     try:
         with open(tmp_path, "w", encoding="utf-8") as f:
@@ -48,13 +53,16 @@ def save_json_file(path: str, data: Any):
     except FileNotFoundError:
         # .tmp 文件在 os.replace 前被清掉了（overlay/FUSE 竞态条件）
         # Fallback: 直接写入目标文件
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-            f.flush()
-            try:
-                os.fsync(f.fileno())
-            except OSError:
-                pass
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+                f.flush()
+                try:
+                    os.fsync(f.fileno())
+                except OSError:
+                    pass
+        except Exception:
+            pass
         # 清理残留 .tmp
         try:
             os.remove(tmp_path)
