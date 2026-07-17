@@ -5,19 +5,31 @@ from datetime import datetime, timezone
 from typing import Optional, Any
 
 def load_json_file(path: str, default: Any) -> Any:
-    """从文件加载 JSON，失败则返回默认值。加重试避免竞态条件。"""
+    """从文件加载 JSON，失败则返回默认值。避免与 bot 写入竞态。"""
     for attempt in range(3):
         try:
             if os.path.exists(path):
-                with open(path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                if data:  # 非空才算成功
+                # 先 copy 到内存再 parse，避免读到写入中的文件
+                import shutil
+                tmp_copy = path + ".read_tmp"
+                try:
+                    shutil.copy2(path, tmp_copy)
+                    with open(tmp_copy, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    os.remove(tmp_copy)
+                except Exception:
+                    try:
+                        os.remove(tmp_copy)
+                    except OSError:
+                        pass
+                    return default
+                if data:
                     return data
         except Exception:
             pass
         if attempt < 2:
             import time
-            time.sleep(0.1)  # 短暂等待，避开 bot 写入窗口
+            time.sleep(0.1)
     return default
 
 def save_json_file(path: str, data: Any):
