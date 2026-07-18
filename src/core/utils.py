@@ -34,17 +34,33 @@ def save_json_file(path: str, data: Any):
             os.fsync(f.fileno())
         os.rename(tmp_path, path)
     except (FileNotFoundError, OSError):
-        # FUSE rename 失败时，直接原地写入
+        # FUSE rename 失败时，用不同策略写：先写 .new 再 rename，避免 truncate 导致文件为空
         try:
             os.remove(tmp_path)
         except OSError:
             pass
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-            f.flush()
-            try:
+        new_path = f"{path}.new"
+        try:
+            with open(new_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+                f.flush()
                 os.fsync(f.fileno())
+            os.rename(new_path, path)
+        except Exception:
+            try:
+                os.remove(new_path)
             except OSError:
+                pass
+            # 最终 fallback: 直接写（可能读到不完整数据，但至少不会清空文件）
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
+                    f.flush()
+                    try:
+                        os.fsync(f.fileno())
+                    except OSError:
+                        pass
+            except Exception:
                 pass
     except Exception:
         try:
