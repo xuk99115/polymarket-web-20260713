@@ -469,15 +469,7 @@ class TradingBotManager:
     def _refresh_summary(self) -> None:
         state = self.state_manager.get_state()
         positions = state.get("positions", [])
-        cash = safe_float(state.get("cash_balance"), 0.0) or 0.0
-        reserved = sum(safe_float(position.get("stake"), 0.0) or 0.0 for position in positions)
-        unrealized = 0.0
-        for position in positions:
-            shares = safe_float(position.get("shares"), position.get("size")) or 0.0
-            bid = safe_float(position.get("current_bid"), position.get("entry_price")) or 0.0
-            stake = safe_float(position.get("stake"), 0.0) or 0.0
-            unrealized += shares * bid - stake
-
+        
         closed = [
             trade
             for trade in state.get("trades", [])
@@ -489,6 +481,15 @@ class TradingBotManager:
         losses = sum((safe_float(trade.get("realized_profit"), 0.0) or 0.0) < 0 for trade in closed)
         total = len(closed)
         start_balance = Config.get_float("PAPER_START_BALANCE", "100")
+        cash = round(start_balance + realized, 4)
+        
+        reserved = sum(safe_float(position.get("stake"), 0.0) or 0.0 for position in positions)
+        unrealized = 0.0
+        for position in positions:
+            shares = safe_float(position.get("shares"), position.get("size")) or 0.0
+            bid = safe_float(position.get("current_bid"), position.get("entry_price")) or 0.0
+            stake = safe_float(position.get("stake"), 0.0) or 0.0
+            unrealized += shares * bid - stake
         ending = round(cash + reserved + unrealized, 4)
         state["stats"] = {
             "total_trades": total,
