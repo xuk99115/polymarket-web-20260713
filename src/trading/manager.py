@@ -525,8 +525,15 @@ class TradingBotManager:
         summary_file = os.path.join(os.path.dirname(self.state_manager.state_file), "state_summary.json")
         try:
             snap_data = dict(state["summary"])
+            # 直接写入，不用 save_json_file（FUSE rename 不可靠）
+            with open(summary_file, "w", encoding="utf-8") as f:
+                json.dump(snap_data, f, indent=2, ensure_ascii=False)
+                f.flush()
+                try:
+                    os.fsync(f.fileno())
+                except OSError:
+                    pass
             logger.info("save_summary_snap: cash=%.4f file=%s", snap_data.get("cash_balance"), summary_file)
-            save_json_file(summary_file, snap_data)
         except Exception as e:
             logger.warning("save_summary_snap failed: %s", e)
 
