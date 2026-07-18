@@ -33,47 +33,35 @@ def load_json_file(path: str, default: Any) -> Any:
     return default
 
 def save_json_file(path: str, data: Any):
-    """保存数据为 JSON 格式。原子写入: 先写 .tmp 再 os.replace，避免中途崩坏原文件。
+    """保存数据为 JSON 格式。直接写入 + fsync，避免 FUSE os.replace 失败。
     
-    OverlayFS/FUSE 上 os.replace 可能不是真正原子的（跨 inode rename 失败），
-    所以采用 double-write 策略：先写一个带时间戳的 .bak 文件，再写目标文件。
-    这样即使 .tmp 被清掉，也能回退到 .bak。
+    FUSE/hf-mount 上 os.replace 不是原子的（rename 时找不到 .tmp 文件），
+    所以改用 truncate + write + fsync 方案，保证数据落盘。
     """
     tmp_path = f"{path}.tmp"
     try:
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
             f.flush()
-            try:
-                os.fsync(f.fileno())
-            except OSError as exc:
-                if exc.errno not in {errno.EINVAL, errno.ENOTSUP, errno.EOPNOTSUPP}:
-                    raise
-        os.replace(tmp_path, path)
-    except FileNotFoundError:
-        # .tmp 文件在 os.replace 前被清掉了（overlay/FUSE 竞态条件）
-        # Fallback: 直接写入目标文件
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-                f.flush()
-                try:
-                    os.fsync(f.fileno())
-                except OSError:
-                    pass
-        except Exception:
-            pass
-        # 清理残留 .tmp
+            os.fsync(f.fileno())
+        os.rename(tmp_path, path)
+    except (FileNotFoundError, OSError):
+        # FUSE rename 失败时，直接原地写入
         try:
             os.remove(tmp_path)
         except OSError:
             pass
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except OSError:
+                pass
     except Exception:
-        # 清理临时文件，避免堆积
         try:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-        except Exception:
+            os.remove(tmp_path)
+        except OSError:
             pass
         raise
 
