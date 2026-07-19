@@ -156,6 +156,54 @@ class FVEdgeStrategy:
             ):
                 continue
             market_ref = ref_override or market.get("chainlink_ref_px") or market.get("ref_px") or global_ref_px
+
+            # Shadow mode: 先检查方向过滤（不实际限制），记录所有候选
+            was_filtered = False
+            assumed_pnl = 0.0
+            if direction_filter is not None and direction_filter.mode == "shadow":
+                up_sig = {
+                    "outcome_label": "Up", "slug": slug,
+                    "edge_bps": 0, "fair_selected": 0.5,
+                    "current_ask": 0, "mte_minutes": 0,
+                }
+                down_sig = {
+                    "outcome_label": "Down", "slug": slug,
+                    "edge_bps": 0, "fair_selected": 0.5,
+                    "current_ask": 0, "mte_minutes": 0,
+                }
+                # 评估 Up 方向
+                up_eval = self._evaluate_market(
+                    market, now_utc, btc_price, market_ref, sigma_15m,
+                    ref_source=ref_record.get("source") or market.get("chainlink_ref_source"),
+                    direction_filter=None,
+                )
+                if up_eval:
+                    up_sig["edge_bps"] = up_eval.get("edge_bps", 0)
+                    up_sig["fair_selected"] = up_eval.get("fair_selected", 0.5)
+                    up_sig["current_ask"] = up_eval.get("current_ask", 0)
+                    up_sig["mte_minutes"] = up_eval.get("mte_minutes", 0)
+                    if not direction_filter.should_allow_trade(up_sig, now_utc.timestamp()):
+                        was_filtered = True
+                        assumed_pnl = up_eval.get("edge_bps", 0) * up_sig.get("current_ask", 0) / 10000.0 * 2.0
+                    else:
+                        direction_filter.record_shadow_candidate(up_sig, was_filtered=False)
+                # 评估 Down 方向
+                down_eval = self._evaluate_market(
+                    market, now_utc, btc_price, market_ref, sigma_15m,
+                    ref_source=ref_record.get("source") or market.get("chainlink_ref_source"),
+                    direction_filter=None,
+                )
+                if down_eval:
+                    down_sig["edge_bps"] = down_eval.get("edge_bps", 0)
+                    down_sig["fair_selected"] = down_eval.get("fair_selected", 0.5)
+                    down_sig["current_ask"] = down_eval.get("current_ask", 0)
+                    down_sig["mte_minutes"] = down_eval.get("mte_minutes", 0)
+                    if not direction_filter.should_allow_trade(down_sig, now_utc.timestamp()):
+                        was_filtered = True
+                        assumed_pnl = down_eval.get("edge_bps", 0) * down_sig.get("current_ask", 0) / 10000.0 * 2.0
+                    else:
+                        direction_filter.record_shadow_candidate(down_sig, was_filtered=False)
+
             sig = self._evaluate_market(
                 market,
                 now_utc,
@@ -167,14 +215,10 @@ class FVEdgeStrategy:
             )
             if sig is None:
                 continue
-            
+
             signals.append(sig)
             self.signals_emitted += 1
             self.last_qualifying_count += 1
-            
-            # shadow 模式下记录允许通过的候选
-            if direction_filter is not None and direction_filter.mode == "shadow":
-                direction_filter.record_shadow_candidate(sig, was_filtered=False)
                 
         return signals
 

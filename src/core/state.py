@@ -76,4 +76,19 @@ class StatusExporter:
 
     @staticmethod
     def export(data: Dict[str, Any]):
+        # 增量写入：先读取现有文件，保留 direction_* 字段
+        existing = {}
+        try:
+            if os.path.exists(STATUS_FILE):
+                with open(STATUS_FILE, "r") as f:
+                    try:
+                        existing = json.load(f)
+                    except json.JSONDecodeError:
+                        pass
+        except (OSError, IOError):
+            pass
+        # 合并方向字段
+        for key in list(existing.keys()):
+            if key.startswith("direction"):
+                data[key] = existing[key]
         save_json_file(STATUS_FILE, data)
