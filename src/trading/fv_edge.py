@@ -260,7 +260,12 @@ class FVEdgeStrategy:
             elif not allowed_down:
                 # 只考虑 Up
                 candidates = [(edge_up_bps, 0, "Up", up_ask, up_bid)]
-            # else: NEUTRAL → 双向都允许，保持原 candidates
+            else:
+                # NEUTRAL → 双向都允许
+                candidates = [
+                    (edge_up_bps, 0, "Up", up_ask, up_bid),
+                    (edge_down_bps, 1, "Down", down_ask, down_bid),
+                ]
         else:
             candidates = [
                 (edge_up_bps, 0, "Up", up_ask, up_bid),
