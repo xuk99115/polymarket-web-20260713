@@ -183,9 +183,11 @@ class FVEdgeStrategy:
                     up_sig["current_ask"] = up_eval.get("current_ask", 0)
                     up_sig["mte_minutes"] = up_eval.get("mte_minutes", 0)
                     if not direction_filter.should_allow_trade(up_sig, now_utc.timestamp()):
-                        was_filtered = True
+                        # 被方向过滤拦截 → 记录为 filtered
                         assumed_pnl = up_eval.get("edge_bps", 0) * up_sig.get("current_ask", 0) / 10000.0 * 2.0
+                        direction_filter.record_shadow_candidate(up_sig, was_filtered=True, assumed_pnl=assumed_pnl)
                     else:
+                        # 允许通过 → 记录为 allowed
                         direction_filter.record_shadow_candidate(up_sig, was_filtered=False)
                 # 评估 Down 方向
                 down_eval = self._evaluate_market(
@@ -199,9 +201,11 @@ class FVEdgeStrategy:
                     down_sig["current_ask"] = down_eval.get("current_ask", 0)
                     down_sig["mte_minutes"] = down_eval.get("mte_minutes", 0)
                     if not direction_filter.should_allow_trade(down_sig, now_utc.timestamp()):
-                        was_filtered = True
+                        # 被方向过滤拦截 → 记录为 filtered
                         assumed_pnl = down_eval.get("edge_bps", 0) * down_sig.get("current_ask", 0) / 10000.0 * 2.0
+                        direction_filter.record_shadow_candidate(down_sig, was_filtered=True, assumed_pnl=assumed_pnl)
                     else:
+                        # 允许通过 → 记录为 allowed
                         direction_filter.record_shadow_candidate(down_sig, was_filtered=False)
 
             sig = self._evaluate_market(

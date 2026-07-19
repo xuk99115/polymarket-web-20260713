@@ -29,28 +29,33 @@ def test_up_trend():
     now = time.time()
     f = DirectionFilter(mode="shadow"); f.set_history(_mk(now, [(100.0,3600),(100.5,900),(101.0,0)]))
     r = f.calculate()
-    assert r.direction == DirectionState.UP, f"UP: {r.direction} 60m={r.pct_60m}% 15m={r.pct_15m}%"
+    # 首次 UP → TRANSITION
+    assert r.direction == DirectionState.TRANSITION, f"TRANSITION: {r.direction} 60m={r.pct_60m}% 15m={r.pct_15m}%"
+    raw = f._do_calculate()
+    assert raw.direction == DirectionState.UP, f"Raw should be UP, got {raw.direction}"
 
 
 def test_down_trend():
     now = time.time()
     f = DirectionFilter(mode="shadow"); f.set_history(_mk(now, [(100.0,3600),(99.5,900),(99.0,0)]))
     r = f.calculate()
-    assert r.direction == DirectionState.DOWN, f"DOWN: {r.direction}"
+    assert r.direction == DirectionState.TRANSITION, f"TRANSITION: {r.direction}"
+    raw = f._do_calculate()
+    assert raw.direction == DirectionState.DOWN, f"Raw should be DOWN, got {raw.direction}"
 
 
 def test_neutral_60m_below_threshold():
     now = time.time()
     f = DirectionFilter(mode="shadow"); f.set_history(_mk(now, [(100.0,3600),(100.5,900),(100.015,0)]))
     r = f.calculate()
-    assert r.direction == DirectionState.NEUTRAL
+    assert r.direction == DirectionState.TRANSITION, f"TRANSITION: {r.direction} 60m={r.pct_60m}%"
 
 
 def test_neutral_15m_below_threshold():
     now = time.time()
     f = DirectionFilter(mode="shadow"); f.set_history(_mk(now, [(100.0,3600),(100.95,900),(100.93,0)]))
     r = f.calculate()
-    assert r.direction == DirectionState.NEUTRAL, f"NEUTRAL: {r.direction} 60m={r.pct_60m}% 15m={r.pct_15m}%"
+    assert r.direction == DirectionState.TRANSITION, f"TRANSITION: {r.direction} 60m={r.pct_60m}% 15m={r.pct_15m}%"
 
 
 def test_unknown_no_data():
@@ -74,7 +79,7 @@ def test_up_strict_same_direction():
     now = time.time()
     f = DirectionFilter(mode="shadow"); f.set_history(_mk(now, [(100.0,3600),(100.95,900),(100.90,0)]))
     r = f.calculate()
-    assert r.direction == DirectionState.NEUTRAL, f"NEUTRAL: {r.direction} 60m={r.pct_60m}% 15m={r.pct_15m}%"
+    assert r.direction == DirectionState.TRANSITION, f"TRANSITION: {r.direction} 60m={r.pct_60m}% 15m={r.pct_15m}%"
 
 
 def test_cold_start_insufficient_window():
@@ -95,7 +100,7 @@ def test_confirm_twice():
     f = DirectionFilter(mode="shadow", update_seconds=1)
     f.set_history(ticks)
     r1 = f.calculate(now=now)
-    assert r1.direction == DirectionState.UP, f"First calc should be UP (initial), got {r1.direction}"
+    assert r1.direction == DirectionState.TRANSITION, f"First should be TRANSITION, got {r1.direction}"
     r2 = f.calculate(now=now + 1)
     assert r2.direction == DirectionState.UP
 
@@ -106,15 +111,15 @@ def test_transition_then_confirm():
     f = DirectionFilter(mode="enforce", update_seconds=1)
     f.set_history(ticks_up)
     r1 = f.calculate(now=now)
-    assert r1.direction == DirectionState.UP
+    assert r1.direction == DirectionState.TRANSITION, f"First should be TRANSITION, got {r1.direction}"
     
     ticks_down = _mk(now + 1, [(100.0,3600),(99.5,900),(99.0,0)])
     f.set_history(ticks_down)
     r2 = f.calculate(now=now + 1)
-    assert r2.direction == DirectionState.TRANSITION
+    assert r2.direction == DirectionState.TRANSITION, f"Should be TRANSITION, got {r2.direction}"
     
     r3 = f.calculate(now=now + 2)
-    assert r3.direction == DirectionState.DOWN
+    assert r3.direction == DirectionState.DOWN, f"Second DOWN should be DOWN, got {r3.direction}"
 
 
 def test_transition_cancel_on_up():
@@ -123,19 +128,19 @@ def test_transition_cancel_on_up():
     f = DirectionFilter(mode="enforce", update_seconds=1)
     f.set_history(ticks_up)
     r1 = f.calculate(now=now)
-    assert r1.direction == DirectionState.UP
+    assert r1.direction == DirectionState.TRANSITION, f"First should be TRANSITION, got {r1.direction}"
     
     ticks_down = _mk(now + 1, [(100.0,3600),(99.5,900),(99.0,0)])
     f.set_history(ticks_down)
     r2 = f.calculate(now=now + 1)
-    assert r2.direction == DirectionState.TRANSITION
+    assert r2.direction == DirectionState.TRANSITION, f"Should be TRANSITION, got {r2.direction}"
     
     # 恢复 UP → 取消反转，重新确认
     f.set_history(ticks_up)
     r3 = f.calculate(now=now + 2)
-    assert r3.direction == DirectionState.TRANSITION
+    assert r3.direction == DirectionState.TRANSITION, f"Should be TRANSITION (new UP), got {r3.direction}"
     r4 = f.calculate(now=now + 3)
-    assert r4.direction == DirectionState.UP
+    assert r4.direction == DirectionState.UP, f"Should be UP, got {r4.direction}"
 
 
 def test_data_stale_resets_to_unknown():
@@ -145,7 +150,7 @@ def test_data_stale_resets_to_unknown():
     f = DirectionFilter(mode="enforce", update_seconds=1)
     f.set_history(ticks_up)
     r1 = f.calculate(now=now)
-    assert r1.direction == DirectionState.UP
+    assert r1.direction == DirectionState.TRANSITION, f"First should be TRANSITION, got {r1.direction}"
     
     # 数据过期（stale > 900s）
     stale_ticks = [{"ts": now - 2000, "price": 100.0}]
@@ -161,10 +166,13 @@ def test_confirmed_direction_not_reset_by_same():
     f = DirectionFilter(mode="enforce", update_seconds=1)
     f.set_history(ticks)
     r1 = f.calculate(now=now)
-    assert r1.direction == DirectionState.UP
+    assert r1.direction == DirectionState.TRANSITION, f"First should be TRANSITION, got {r1.direction}"
     
     r2 = f.calculate(now=now + 1)
-    assert r2.direction == DirectionState.UP, f"Same direction after confirm should be UP, not TRANSITION. Got {r2.direction}"
+    assert r2.direction == DirectionState.UP, f"After confirm should be UP, got {r2.direction}"
+    
+    r3 = f.calculate(now=now + 2)
+    assert r3.direction == DirectionState.UP, f"Same direction should stay UP, got {r3.direction}"
 
 
 # ── 交易过滤测试 ───────────────────────────────────────────
@@ -190,46 +198,46 @@ def test_enforce_transition_blocks():
     f = DirectionFilter(mode="enforce", update_seconds=1)
     f.set_history(ticks_up)
     r1 = f.calculate(now=now)
-    assert r1.direction == DirectionState.UP
+    assert r1.direction == DirectionState.TRANSITION, f"First should be TRANSITION, got {r1.direction}"
     
     ticks_down = _mk(now + 1, [(100.0,3600),(99.5,900),(99.0,0)])
     f.set_history(ticks_down)
     r2 = f.calculate(now=now + 1)
-    assert r2.direction == DirectionState.TRANSITION
+    assert r2.direction == DirectionState.TRANSITION, f"Should be TRANSITION, got {r2.direction}"
     
+    # TRANSITION 期间 enforce 禁止所有方向
     signal = {"outcome_label": "Down", "slug": "test"}
     assert f.should_allow_trade(signal) is False
 
 
 def test_neutral_allows_both():
+    """NEUTRAL 方向 enforce 允许双向"""
     now = time.time()
     ticks = _mk(now, [(100.0,3600),(100.95,900),(100.93,0)])
-    f = DirectionFilter(mode="enforce")
-    f.set_history(ticks)
+    f = DirectionFilter(mode="enforce", update_seconds=1); f.set_history(ticks)
     
-    up_signal = {"outcome_label": "Up", "slug": "test"}
-    down_signal = {"outcome_label": "Down", "slug": "test"}
+    r1 = f.calculate(now=now)
+    assert r1.direction == DirectionState.TRANSITION, f"First should be TRANSITION, got {r1.direction}"
+    r2 = f.calculate(now=now + 1)
+    assert r2.direction == DirectionState.NEUTRAL, f"Second should be NEUTRAL, got {r2.direction}"
     
-    r = f.calculate(now=now)
-    # NEUTRAL 时 should_allow_trade 直接返回 True
-    assert f.should_allow_trade(up_signal) is True
-    assert f.should_allow_trade(down_signal) is True
-
+    assert f.should_allow_trade({"outcome_label": "Up"}) is True
+    assert f.should_allow_trade({"outcome_label": "Down"}) is True
 
 def test_up_enforce_blocks_down():
+    """已确认 UP 后 enforce 禁止 Down"""
     now = time.time()
     ticks = _mk(now, [(100.0,3600),(100.5,900),(101.0,0)])
-    f = DirectionFilter(mode="enforce")
+    f = DirectionFilter(mode="enforce", update_seconds=1)
     f.set_history(ticks)
     
-    f.calculate(now=now)
-    f.calculate(now=now + 1)
+    r1 = f.calculate(now=now)
+    assert r1.direction == DirectionState.TRANSITION, f"First should be TRANSITION, got {r1.direction}"
+    r2 = f.calculate(now=now + 1)
+    assert r2.direction == DirectionState.UP, f"Second should be UP, got {r2.direction}"
     
-    up_signal = {"outcome_label": "Up", "slug": "test"}
-    down_signal = {"outcome_label": "Down", "slug": "test"}
-    
-    assert f.should_allow_trade(up_signal) is True
-    assert f.should_allow_trade(down_signal) is False
+    assert f.should_allow_trade({"outcome_label": "Up"}) is True
+    assert f.should_allow_trade({"outcome_label": "Down"}) is False
 
 
 def test_integration_methods_exist():
@@ -257,3 +265,28 @@ if __name__ == "__main__":
         except Exception as e: print(f"  ✗ {t.__name__}: {e}"); failed += 1
     print(f"\n{passed}/{passed+failed} passed")
     sys.exit(0 if failed == 0 else 1)
+
+
+def test_unknown_to_up_must_transition():
+    """UNKNOWN → UP 第一次必须是 TRANSITION，不允许直接 UP"""
+    now = time.time()
+    ticks = [{"ts": now - 3600, "price": 100.0}, {"ts": now - 900, "price": 100.5}, {"ts": now, "price": 101.0}]
+    f = DirectionFilter(mode="enforce"); f.set_history(ticks)
+    r = f.calculate(now=now)
+    assert r.direction == DirectionState.TRANSITION, f"UNKNOWN→UP must be TRANSITION, got {r.direction}"
+
+
+def test_confirmed_down_stays_down():
+    """已确认 DOWN 后，连续 DOWN 应保持 DOWN，不再进 TRANSITION"""
+    now = time.time()
+    ticks = [{"ts": now - 3600, "price": 100.0}, {"ts": now - 900, "price": 99.5}, {"ts": now, "price": 99.0}]
+    f = DirectionFilter(mode="enforce", update_seconds=1); f.set_history(ticks)
+    # 第一次 DOWN → TRANSITION
+    r1 = f.calculate(now=now)
+    assert r1.direction == DirectionState.TRANSITION, f"First DOWN should be TRANSITION, got {r1.direction}"
+    # 第二次 DOWN → 确认 DOWN
+    r2 = f.calculate(now=now + 1)
+    assert r2.direction == DirectionState.DOWN, f"Second DOWN should be DOWN, got {r2.direction}"
+    # 第三次 DOWN → 保持 DOWN，不再进 TRANSITION
+    r3 = f.calculate(now=now + 2)
+    assert r3.direction == DirectionState.DOWN, f"Third DOWN should stay DOWN, got {r3.direction}"
