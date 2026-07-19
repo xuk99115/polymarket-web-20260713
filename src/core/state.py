@@ -74,6 +74,12 @@ class StateManager:
 class StatusExporter:
     """负责将当前活跃状态写入 bot_status.json 供前端读取"""
 
+    # 方向状态独立文件（运行时目录，避免 EIO 影响）
+    DIRECTION_STATE_FILE = os.path.join(
+        os.environ.get("RUNTIME_DIR", "/tmp/polymarket-fv-edge/data"),
+        "direction_state.json",
+    )
+
     @staticmethod
     def export(data: Dict[str, Any]):
         # 增量写入：先读取现有文件，保留 direction_* 字段
@@ -87,8 +93,26 @@ class StatusExporter:
                         pass
         except (OSError, IOError):
             pass
-        # 合并方向字段
-        for key in list(existing.keys()):
-            if key.startswith("direction"):
+
+        # 从独立的方向状态文件读取最新值
+        direction_from_file = {}
+        try:
+            if os.path.exists(StatusExporter.DIRECTION_STATE_FILE):
+                with open(StatusExporter.DIRECTION_STATE_FILE, "r") as f:
+                    try:
+                        direction_from_file = json.load(f)
+                    except json.JSONDecodeError:
+                        pass
+        except (OSError, IOError):
+            pass
+
+        # 合并方向字段：优先使用独立文件中的最新值
+        direction_keys = [k for k in existing.keys() if k.startswith("direction")]
+        direction_keys.extend(k for k in direction_from_file.keys() if k.startswith("direction") and k not in direction_keys)
+        for key in direction_keys:
+            if key in direction_from_file:
+                data[key] = direction_from_file[key]
+            elif key in existing:
                 data[key] = existing[key]
+
         save_json_file(STATUS_FILE, data)
