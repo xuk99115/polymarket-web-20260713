@@ -262,25 +262,18 @@ class DirectionFilter:
         result.confirmed_count = self._confirm_count
 
     def _write_cached_status(self, result: DirectionResult) -> None:
-        """写入缓存结果的状态（仅更新 timestamp）。"""
-        runtime_status = os.path.join(
+        """仅更新方向时间戳（写入独立文件，不覆盖其他方向字段）。"""
+        ts_file = os.path.join(
             os.environ.get("RUNTIME_DIR", "/tmp/polymarket-fv-edge/data"),
-            "direction_state.json",
+            "direction_timestamp.json",
         )
         try:
-            cached_data = {}
-            if os.path.exists(runtime_status):
-                with open(runtime_status, "r") as f:
-                    try:
-                        cached_data = json.load(f)
-                    except json.JSONDecodeError:
-                        pass
-            cached_data["direction_updated_at"] = datetime.now(timezone.utc).isoformat()
-            with open(runtime_status, "w") as f:
-                json.dump(cached_data, f, indent=2, ensure_ascii=False)
+            ts_data = {"direction_updated_at": datetime.now(timezone.utc).isoformat()}
+            with open(ts_file, "w") as f:
+                json.dump(ts_data, f, indent=2, ensure_ascii=False)
                 f.flush()
         except (OSError, IOError) as e:
-            logger.warning("Failed to write cached direction state: %s", e)
+            logger.warning("Failed to write cached direction timestamp: %s", e)
 
     def _cached_result(self, now: float) -> DirectionResult:
         return DirectionResult(direction=self._last_direction,

@@ -79,6 +79,11 @@ class StatusExporter:
         os.environ.get("RUNTIME_DIR", "/tmp/polymarket-fv-edge/data"),
         "direction_state.json",
     )
+    # 方向时间戳独立文件（仅更新 timestamp，不覆盖其他字段）
+    DIRECTION_TIMESTAMP_FILE = os.path.join(
+        os.environ.get("RUNTIME_DIR", "/tmp/polymarket-fv-edge/data"),
+        "direction_timestamp.json",
+    )
 
     @staticmethod
     def export(data: Dict[str, Any]):
@@ -106,6 +111,18 @@ class StatusExporter:
         except (OSError, IOError):
             pass
 
+        # 从独立的时间戳文件读取最新 timestamp（避免被旧方向值覆盖）
+        direction_ts = {}
+        try:
+            if os.path.exists(StatusExporter.DIRECTION_TIMESTAMP_FILE):
+                with open(StatusExporter.DIRECTION_TIMESTAMP_FILE, "r") as f:
+                    try:
+                        direction_ts = json.load(f)
+                    except json.JSONDecodeError:
+                        pass
+        except (OSError, IOError):
+            pass
+
         # 合并方向字段：优先使用独立文件中的最新值
         direction_keys = [k for k in existing.keys() if k.startswith("direction")]
         direction_keys.extend(k for k in direction_from_file.keys() if k.startswith("direction") and k not in direction_keys)
@@ -114,5 +131,10 @@ class StatusExporter:
                 data[key] = direction_from_file[key]
             elif key in existing:
                 data[key] = existing[key]
+
+        # 合并方向时间戳（从独立文件读取，保证时效性）
+        for key, val in direction_ts.items():
+            if key.startswith("direction"):
+                data[key] = val
 
         save_json_file(STATUS_FILE, data)
