@@ -124,11 +124,6 @@ class FVEdgeStrategy:
         self.last_evaluation_count = 0
         self.last_qualifying_count = 0
         
-        # 方向过滤：提前计算方向
-        direction_result = None
-        if direction_filter is not None:
-            direction_result = direction_filter.calculate(now=now_utc.timestamp())
-
         btc = self.last_btc_snap or {}
         btc_price = btc.get("price")
         if btc_price is None or btc_price <= 0:
@@ -168,24 +163,16 @@ class FVEdgeStrategy:
                 market_ref,
                 sigma_15m,
                 ref_source=ref_record.get("source") or market.get("chainlink_ref_source"),
+                direction_filter=direction_filter,
             )
             if sig is None:
                 continue
-            
-            # 方向过滤：在 max(edge) 之后、返回之前过滤
-            if direction_filter is not None and direction_result is not None:
-                allowed = direction_filter.should_allow_trade(sig, now_utc.timestamp())
-                if not allowed:
-                    # shadow 模式下记录被过滤的候选
-                    if direction_filter.mode == "shadow":
-                        direction_filter.record_shadow_candidate(sig, was_filtered=True)
-                    continue
             
             signals.append(sig)
             self.signals_emitted += 1
             self.last_qualifying_count += 1
             
-            # shadow 模式下记录允许的候选
+            # shadow 模式下记录允许通过的候选
             if direction_filter is not None and direction_filter.mode == "shadow":
                 direction_filter.record_shadow_candidate(sig, was_filtered=False)
                 
@@ -200,6 +187,7 @@ class FVEdgeStrategy:
         sigma_15m: float,
         *,
         ref_source: Optional[str] = None,
+        direction_filter: Optional[Any] = None,
     ) -> Optional[Dict[str, Any]]:
         slug = market.get("slug", "")
         if not slug.startswith("btc-updown-15m-"):
@@ -256,10 +244,28 @@ class FVEdgeStrategy:
         edge_up_bps = (fair_up - up_ask) * 10000.0
         edge_down_bps = (fair_down - down_ask) * 10000.0
 
-        candidates = [
-            (edge_up_bps, 0, "Up", up_ask, up_bid),
-            (edge_down_bps, 1, "Down", down_ask, down_bid),
-        ]
+        # 方向过滤：在 max(edge) 之前限制候选方向
+        if direction_filter is not None:
+            allowed_up = direction_filter.should_allow_trade(
+                {"outcome_label": "Up", "slug": slug}, now_utc.timestamp()
+            )
+            allowed_down = direction_filter.should_allow_trade(
+                {"outcome_label": "Down", "slug": slug}, now_utc.timestamp()
+            )
+            if not allowed_up and not allowed_down:
+                return None  # UNKNOWN/TRANSITION → 禁止新开仓
+            if not allowed_up:
+                # 只考虑 Down
+                candidates = [(edge_down_bps, 1, "Down", down_ask, down_bid)]
+            elif not allowed_down:
+                # 只考虑 Up
+                candidates = [(edge_up_bps, 0, "Up", up_ask, up_bid)]
+            # else: NEUTRAL → 双向都允许，保持原 candidates
+        else:
+            candidates = [
+                (edge_up_bps, 0, "Up", up_ask, up_bid),
+                (edge_down_bps, 1, "Down", down_ask, down_bid),
+            ]
         edge_bps, outcome_index, outcome_label, buy_price, buy_bid = max(
             candidates, key=lambda item: item[0]
         )
