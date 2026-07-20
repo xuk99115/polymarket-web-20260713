@@ -27,7 +27,8 @@ logger = logging.getLogger("bot")
 
 # 双目录路径（与 manager.py 保持一致）
 RUNTIME_DIR = os.environ.get("RUNTIME_DIR", "/tmp/polymarket-fv-edge/data")
-PERSIST_DIR = os.environ.get("PERSIST_DIR", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data"))
+# bot.py 位于项目根目录；持久卷必须是 <project>/data，不能误指向 /data。
+PERSIST_DIR = os.environ.get("PERSIST_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"))
 
 _stop_event = asyncio.Event()
 
