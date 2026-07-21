@@ -131,9 +131,30 @@ class StatusExporter:
         data["direction_stale_seconds"] = dir_stale
         data["direction_fresh"] = dir_fresh
 
+        runtime_dir = os.environ.get("RUNTIME_DIR", "/tmp/polymarket-fv-edge/data")
+        sync_health = load_json_file(os.path.join(runtime_dir, "sync_health.json"), {})
+        for key, val in sync_health.items():
+            if key.startswith("sync_") or key.startswith("last_sync_"):
+                data[key] = val
+
+        sync_lag = None
+        last_sync_success = data.get("last_sync_success_at")
+        if last_sync_success:
+            try:
+                last_sync_dt = datetime.fromisoformat(last_sync_success)
+                sync_lag = round((datetime.now(timezone.utc) - last_sync_dt).total_seconds(), 1)
+            except (ValueError, TypeError):
+                pass
+        data["sync_lag_seconds"] = sync_lag
+        data["sync_healthy"] = (
+            bool(sync_health.get("sync_healthy"))
+            and sync_lag is not None
+            and sync_lag < 600
+        )
+
         # 写入运行时目录，由 sync 机制推送到永久卷
         runtime_status = os.path.join(
-            os.environ.get("RUNTIME_DIR", "/tmp/polymarket-fv-edge/data"),
+            runtime_dir,
             "bot_status.json",
         )
         save_json_file(runtime_status, data)

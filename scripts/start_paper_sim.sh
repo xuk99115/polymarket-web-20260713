@@ -3,15 +3,16 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 RUNTIME_DIR="$ROOT_DIR/.runtime"
+RUNTIME_LOG_DIR="${RUNTIME_LOG_DIR:-/tmp/polymarket-fv-edge/logs}"
 DATA_DIR="$ROOT_DIR/data"
 DOCS_DIR="$ROOT_DIR/docs"
 BOT_PID_FILE="$RUNTIME_DIR/paper_bot.pid"
 SERVER_PID_FILE="$RUNTIME_DIR/status_server.pid"
-BOT_LOG="$RUNTIME_DIR/paper_bot.log"
+BOT_LOG="$RUNTIME_LOG_DIR/paper_bot.stdout.log"
 SERVER_LOG="$RUNTIME_DIR/status_server.log"
 STATUS_PORT="${STATUS_PORT:-8889}"
 
-mkdir -p "$RUNTIME_DIR"
+mkdir -p "$RUNTIME_DIR" "$RUNTIME_LOG_DIR"
 
 force_stop_pid() {
     local pid="$1"
@@ -104,6 +105,7 @@ export PAPER_WALLET_LABEL="${PAPER_WALLET_LABEL:-LOCAL-FV-EDGE}"
 export FV_EDGE_POSITION_USD="${FV_EDGE_POSITION_USD:-2.0}"
 export FV_EDGE_THRESHOLD_BPS="${FV_EDGE_THRESHOLD_BPS:-300}"
 export FV_EDGE_MAX_MTE="${FV_EDGE_MAX_MTE:-1.5}"
+export RUNTIME_LOG_DIR
 
 cd "$ROOT_DIR"
 

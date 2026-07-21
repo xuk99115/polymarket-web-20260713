@@ -569,7 +569,8 @@ class StatusHandler(http.server.SimpleHTTPRequestHandler):
 
         # === Bot 状态 ===
         if path in {"/status-json", "/api/status"}:
-            data = load_status_from_file()
+            ctx = _instance_context(_instance_key(parsed))
+            data = _load_status_for_instance(ctx)
             send_json(self, data or {})
 
         elif path == "/api/web-token":

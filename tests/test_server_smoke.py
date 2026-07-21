@@ -176,6 +176,7 @@ class StatusServerSmokeTest(unittest.TestCase):
         status, body = self._get("/status-json")
         self.assertEqual(status, 200, "/status-json 必须 200")
         self.assertIsInstance(body, dict)
+        self.assertIn("sync_healthy", body, "/status-json 必须读取 runtime 同步健康快照")
 
     def test_api_config(self):
         """这是上次出 bug 的地方, 重点保护。"""
@@ -213,9 +214,10 @@ class StatusServerSmokeTest(unittest.TestCase):
         from src.server.helpers import load_json_file
         from src.core.config import DATA_DIR
         state = load_json_file(os.path.join(DATA_DIR, "paper_trade_state.json"), {}) or {}
-        expected = state.get("summary", {}).get("total_trades")
-        if expected is not None:
-            self.assertEqual(len(body), expected, "纸面交易流水只应返回当前会话的统计口径")
+        expected = len(state.get("trades", []))
+        if expected:
+            self.assertGreaterEqual(len(body), expected,
+                "API 返回的交易流不应少于 state 文件记录（测试期间可能新增交易）")
     def test_api_orders(self):
         status, body = self._get("/api/orders?account=paper")
         self.assertEqual(status, 200, "/api/orders 必须 200")

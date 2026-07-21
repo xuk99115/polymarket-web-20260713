@@ -16,7 +16,10 @@ import logging
 import os
 import shutil
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
+
+from .utils import load_json_file, save_json_file
 
 logger = logging.getLogger("sync_runtime")
 
@@ -34,7 +37,10 @@ SYNC_FILES = [
     "btc_snapshot.json",
     "btc_window_refs.json",
     "position_audit.jsonl",
+    # 同步健康快照
+    "sync_health.json",
 ]
+SYNC_HEALTH_FILE = "sync_health.json"
 
 
 def _atomic_copy(src: str, dst: str) -> None:
@@ -75,16 +81,37 @@ def sync_runtime_to_persist(
 ) -> int:
     """把运行时文件尽力备份到永久卷；失败不影响交易主循环。"""
     count = 0
-    for fname in files or SYNC_FILES:
+    errors = []
+    requested_files = list(files or SYNC_FILES)
+    for fname in requested_files:
         src = os.path.join(runtime_dir, fname)
         dst = os.path.join(persist_dir, fname)
-        if os.path.exists(src):
-            try:
-                os.makedirs(persist_dir, exist_ok=True)
-                _atomic_copy(src, dst)
-                count += 1
-            except Exception as e:
-                logger.warning("sync R->P failed %s: %s", fname, e)
+        if not os.path.exists(src):
+            errors.append(f"{fname}: missing runtime source")
+            logger.warning("sync R->P skipped %s: missing runtime source", fname)
+            continue
+        try:
+            os.makedirs(persist_dir, exist_ok=True)
+            _atomic_copy(src, dst)
+            count += 1
+        except Exception as e:
+            errors.append(f"{fname}: {e}")
+            logger.warning("sync R->P failed %s: %s", fname, e)
+
+    health_path = os.path.join(runtime_dir, SYNC_HEALTH_FILE)
+    previous = load_json_file(health_path, {})
+    now = datetime.now(timezone.utc).isoformat()
+    all_succeeded = bool(requested_files) and count == len(requested_files)
+    health = {
+        "last_sync_attempt_at": now,
+        "last_sync_success_at": now if all_succeeded else previous.get("last_sync_success_at"),
+        "sync_healthy": all_succeeded,
+        "sync_files_synced": count,
+        "sync_files_total": len(requested_files),
+        "sync_error_count": int(previous.get("sync_error_count", 0)) + len(errors),
+        "sync_last_error": errors[-1] if errors else None,
+    }
+    save_json_file(health_path, health)
     return count
 
 

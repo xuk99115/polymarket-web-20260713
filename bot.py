@@ -6,23 +6,49 @@ Polymarket 通用盘口交易机器人 - 引导脚本
 
 import asyncio
 import logging
+from logging.handlers import RotatingFileHandler
 import signal
 import sys
 import os
 
-from src.trading.manager import TradingBotManager
 from src.core.sync_runtime import (
     sync_persist_to_runtime,
     force_sync,
     periodic_sync,
 )
 
-# 设置日志格式
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-    datefmt='%H:%M:%S'
-)
+def configure_logging(
+    log_dir: str | None = None,
+    max_bytes: int = 20 * 1024 * 1024,
+    backup_count: int = 5,
+) -> RotatingFileHandler:
+    """把 Bot 日志写入临时盘并限制总量，隔离持久卷 EIO。"""
+    runtime_log_dir = log_dir or os.environ.get(
+        "RUNTIME_LOG_DIR", "/tmp/polymarket-fv-edge/logs"
+    )
+    os.makedirs(runtime_log_dir, exist_ok=True)
+    handler = RotatingFileHandler(
+        os.path.join(runtime_log_dir, "paper_bot.log"),
+        maxBytes=max_bytes,
+        backupCount=backup_count,
+        encoding="utf-8",
+    )
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    ))
+    handler._polymarket_runtime_handler = True
+
+    root_logger = logging.getLogger()
+    for existing in list(root_logger.handlers):
+        if getattr(existing, "_polymarket_runtime_handler", False):
+            root_logger.removeHandler(existing)
+            existing.close()
+    root_logger.setLevel(logging.INFO)
+    root_logger.addHandler(handler)
+    return handler
+
+
 logger = logging.getLogger("bot")
 
 # 双目录路径（与 manager.py 保持一致）
@@ -34,6 +60,8 @@ _stop_event = asyncio.Event()
 
 
 async def main():
+    from src.trading.manager import TradingBotManager
+
     # 1. 启动时：PERSIST -> RUNTIME（恢复最新数据）
     logger.info("Startup sync: %s -> %s", PERSIST_DIR, RUNTIME_DIR)
     synced = sync_persist_to_runtime(PERSIST_DIR, RUNTIME_DIR)
@@ -74,6 +102,7 @@ async def main():
 
 
 if __name__ == "__main__":
+    configure_logging()
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
