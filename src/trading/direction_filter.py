@@ -84,24 +84,32 @@ class DirectionFilter:
             stale_seconds=raw.stale_seconds, confirmed_count=raw.confirmed_count,
         )
 
-    def should_allow_trade(self, signal: Dict[str, Any], now: Optional[float] = None) -> bool:
-        if self.mode == "off":
-            return True
+    def evaluate_trade(self, signal: Dict[str, Any], now: Optional[float] = None) -> Dict[str, Any]:
+        """Return the enforce counterfactual without changing shadow execution."""
+        evaluated_at = datetime.fromtimestamp(now or time.time(), tz=timezone.utc)
         result = self.calculate(now)
-        d = result.direction
-        if d == DirectionState.NEUTRAL:
+        direction = result.direction
+        outcome_label = signal.get("outcome_label", "")
+        would_allow = (
+            direction == DirectionState.NEUTRAL
+            or (direction == DirectionState.UP and outcome_label == "Up")
+            or (direction == DirectionState.DOWN and outcome_label == "Down")
+        )
+        return {
+            "direction_mode": self.mode,
+            "direction_gate": direction.value,
+            "direction_would_allow": would_allow,
+            "direction_evaluated_at": evaluated_at.isoformat(),
+            "direction_pct_15m": result.pct_15m,
+            "direction_pct_60m": result.pct_60m,
+            "direction_stale_seconds": result.stale_seconds,
+            "direction_confirmed": result.confirmed_count,
+        }
+
+    def should_allow_trade(self, signal: Dict[str, Any], now: Optional[float] = None) -> bool:
+        if self.mode in {"off", "shadow"}:
             return True
-        if d == DirectionState.UNKNOWN:
-            return self.mode == "shadow"
-        if d == DirectionState.TRANSITION:
-            return self.mode == "shadow"
-        if self.mode == "enforce":
-            ol = signal.get("outcome_label", "")
-            if d == DirectionState.UP and ol != "Up":
-                return False
-            if d == DirectionState.DOWN and ol != "Down":
-                return False
-        return True
+        return self.evaluate_trade(signal, now)["direction_would_allow"]
 
     def record_shadow_candidate(self, signal: Dict[str, Any], was_filtered: bool, assumed_pnl: float = 0.0) -> None:
         stats = self._shadow_stats

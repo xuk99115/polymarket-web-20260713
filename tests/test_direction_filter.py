@@ -183,6 +183,18 @@ def test_shadow_does_not_block():
     assert f.should_allow_trade(signal) is True
 
 
+def test_shadow_decision_records_enforce_block_without_blocking_trade():
+    f = DirectionFilter(mode="shadow")
+    f.set_history([])
+
+    decision = f.evaluate_trade({"outcome_label": "Up", "slug": "test"})
+
+    assert decision["direction_mode"] == "shadow"
+    assert decision["direction_gate"] == "UNKNOWN"
+    assert decision["direction_would_allow"] is False
+    assert f.should_allow_trade({"outcome_label": "Up", "slug": "test"}) is True
+
+
 def test_enforce_unknown_blocks():
     f = DirectionFilter(mode="enforce")
     f.set_history([])

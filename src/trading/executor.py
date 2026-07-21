@@ -120,6 +120,13 @@ class PaperExecutor(BaseExecutor):
             "opened_at": now_utc.isoformat(),
             "status": "OPEN"
         }
+        for key in (
+            "direction_mode", "direction_gate", "direction_would_allow",
+            "direction_evaluated_at", "direction_pct_15m", "direction_pct_60m",
+            "direction_stale_seconds", "direction_confirmed",
+        ):
+            if key in (signal or {}):
+                position[key] = signal[key]
 
         trade = {
             "id": trade_id,
@@ -137,6 +144,13 @@ class PaperExecutor(BaseExecutor):
             "reason": signal.get("reason") if signal else "",
             "code_version": "v2",
         }
+        for key in (
+            "direction_mode", "direction_gate", "direction_would_allow",
+            "direction_evaluated_at", "direction_pct_15m", "direction_pct_60m",
+            "direction_stale_seconds", "direction_confirmed",
+        ):
+            if key in (signal or {}):
+                trade[key] = signal[key]
 
         state["positions"].append(position)
         state.setdefault("trades", []).insert(0, trade)
@@ -175,6 +189,16 @@ class PaperExecutor(BaseExecutor):
             buy_trade["status"] = exit_reason
             buy_trade["closed_at"] = now_utc
             buy_trade["close_price"] = exit_price
+            buy_trade["oracle_settlement_price"] = exit_price
+            direction = buy_trade.get("direction_gate")
+            outcome_label = buy_trade.get("outcome_label") or buy_trade.get("outcome")
+            would_allow = (
+                direction == "NEUTRAL"
+                or (direction == "UP" and outcome_label == "Up")
+                or (direction == "DOWN" and outcome_label == "Down")
+            )
+            buy_trade["direction_shadow_realized_pnl"] = profit
+            buy_trade["direction_enforce_realized_pnl"] = round(profit if would_allow else 0.0, 4)
             # 保留 realized_profit 供前端显示; _refresh_summary 只算 SELL 侧 PnL,
             # 不会双重计数.
             buy_trade["realized_profit"] = profit
@@ -192,7 +216,7 @@ class PaperExecutor(BaseExecutor):
         else:
             stats["losing_trades"] += 1
 
-        state.setdefault("trades", []).insert(0, {
+        close_trade = {
             "id": _short_id("trade-close"),
             "created_at": datetime.now(timezone.utc).isoformat(),
             "side": "SELL",
@@ -202,12 +226,26 @@ class PaperExecutor(BaseExecutor):
             "amount": proceeds,
             "size": position.get("shares"),
             "price": exit_price,
+            "oracle_settlement_price": exit_price,
             "status": exit_reason,
             "reason": exit_reason,
             "realized_profit": profit,
             "entry_trade_id": position.get("entry_trade_id"),
             "code_version": "v2",
-        })
+        }
+        for key in (
+            "direction_mode", "direction_gate", "direction_would_allow",
+            "direction_evaluated_at", "direction_pct_15m", "direction_pct_60m",
+            "direction_stale_seconds", "direction_confirmed",
+        ):
+            if key in position:
+                close_trade[key] = position[key]
+        close_trade["direction_shadow_realized_pnl"] = profit
+        close_trade["direction_enforce_realized_pnl"] = round(
+            profit if close_trade.get("direction_would_allow") else 0.0,
+            4,
+        )
+        state.setdefault("trades", []).insert(0, close_trade)
 
         self.state_manager.save()
         return f"模拟平仓成功: {exit_reason}, 盈亏: {profit:+.2f}"

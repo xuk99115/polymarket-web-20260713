@@ -80,6 +80,10 @@ class TestFvManager(unittest.IsolatedAsyncioTestCase):
             "fair_up": 0.45,
             "mte_minutes": 2.0,
             "ref_px": 100000,
+            "direction_mode": "shadow",
+            "direction_gate": "UP",
+            "direction_would_allow": True,
+            "direction_evaluated_at": now.isoformat(),
         }
         manager = self.make_manager()
 
@@ -89,7 +93,9 @@ class TestFvManager(unittest.IsolatedAsyncioTestCase):
         state = manager.state_manager.get_state()
         self.assertEqual(state["positions"][0]["strategy"], "fv_edge")
         self.assertTrue(state["positions"][0]["hold_to_expiry"])
+        self.assertEqual(state["positions"][0]["direction_gate"], "UP")
         self.assertEqual(state["trades"][0]["strategy"], "fv_edge")
+        self.assertTrue(state["trades"][0]["direction_would_allow"])
         self.assertEqual(state["fv_signal_history"][0]["model"], "fv_edge")
 
     async def test_expired_paper_position_settles_at_zero(self):
@@ -119,6 +125,41 @@ class TestFvManager(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state["cash_balance"], 98.0)
         self.assertEqual(state["trades"][0]["realized_profit"], -2.0)
         self.assertTrue(any("EXPIRY_EXIT" in message for message in messages))
+
+    async def test_settlement_backfills_direction_shadow_oracle_and_pnl(self):
+        now = datetime.now(timezone.utc)
+        market = market_at(now, prices=[1.0, 0.0])
+        market["end_date"] = (now - timedelta(seconds=1)).isoformat()
+        state = {
+            "cash_balance": 98.0,
+            "positions": [{
+                "id": "p1", "market_slug": market["slug"], "outcome": "Up",
+                "outcome_label": "Up", "outcome_index": 0, "token_id": "up",
+                "stake": 2.0, "shares": 4.0, "entry_price": 0.5,
+                "entry_trade_id": "t1", "status": "OPEN",
+                "direction_mode": "shadow", "direction_gate": "DOWN",
+                "direction_would_allow": False,
+            }],
+            "orders": [],
+            "trades": [{
+                "id": "t1", "market_slug": market["slug"], "outcome": "Up",
+                "side": "BUY", "size": 4.0, "status": "OPEN",
+                "direction_mode": "shadow", "direction_gate": "DOWN",
+                "direction_would_allow": False,
+            }],
+            "stats": {}, "summary": {}, "report": {}, "fv_signal_history": [],
+        }
+        manager = self.make_manager(state)
+
+        await manager._manage_positions(now, [market])
+
+        buy = next(trade for trade in state["trades"] if trade["side"] == "BUY")
+        sell = next(trade for trade in state["trades"] if trade["side"] == "SELL")
+        self.assertEqual(buy["oracle_settlement_price"], 1.0)
+        self.assertEqual(buy["direction_shadow_realized_pnl"], 2.0)
+        self.assertEqual(buy["direction_enforce_realized_pnl"], 0.0)
+        self.assertEqual(sell["direction_gate"], "DOWN")
+        self.assertFalse(sell["direction_would_allow"])
 
     async def test_mode_swap_is_rejected_with_exposure(self):
         state = {
