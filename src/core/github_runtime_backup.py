@@ -109,6 +109,8 @@ def push_runtime_backup_via_temp_clone(
             return {"changed": False, "snapshot": snapshot}
         write_runtime_backup(runtime_dir, str(backup_dir), snapshot)
         subprocess.run(["git", "-C", str(repo), "add", backup_subdir], check=True)
+        subprocess.run(["git", "-C", str(repo), "config", "user.name", "runtime-backup[bot]"], check=True)
+        subprocess.run(["git", "-C", str(repo), "config", "user.email", "runtime-backup[bot]@users.noreply.github.com"], check=True)
         subprocess.run(["git", "-C", str(repo), "commit", "-m", "chore: snapshot runtime state"], check=True)
         subprocess.run(["git", "-C", str(repo), "push", "origin", f"HEAD:{branch}"], check=True)
     return {"changed": True, "snapshot": snapshot}
