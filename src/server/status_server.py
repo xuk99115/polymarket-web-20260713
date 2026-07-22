@@ -590,15 +590,15 @@ class StatusHandler(http.server.SimpleHTTPRequestHandler):
 
         # === BTC 趋势 ===
         elif path == "/api/btc-trend":
-            snap = load_json_file(os.path.join(DATA_DIR, "btc_snapshot.json"), None)
+            snap = load_json_file(os.path.join(RUNTIME_DIR, "btc_snapshot.json"), None)
             if not snap:
                 send_json(self, {"error": "btc_snapshot 未生成 (bot 可能还在启动)", "fallback": get_btc_price()})
             else:
                 snap = dict(snap)
                 # FV training status for dashboard sample and reference diagnostics.
                 try:
-                    pred_path = os.path.join(DATA_DIR, "fair_value_predictions.jsonl")
-                    refs_path = os.path.join(DATA_DIR, "btc_window_refs.json")
+                    pred_path = os.path.join(RUNTIME_DIR, "fair_value_predictions.jsonl")
+                    refs_path = os.path.join(RUNTIME_DIR, "btc_window_refs.json")
                     pred_lines = []
                     if os.path.exists(pred_path):
                         with open(pred_path, "r", encoding="utf-8") as f:
