@@ -6,7 +6,8 @@ set -euo pipefail
 
 # 基础路径
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-VENV_DIR="$ROOT_DIR/venv"
+# 解释器优先 /tmp，避免 /data FUSE EIO 导致 pycryptodome 原生库加载失败
+TMP_VENV="${TMP_VENV:-/tmp/polymarket-fv-edge-venv}"
 SCRIPTS_DIR="$ROOT_DIR/scripts"
 
 echo "🚀 正在初始化 Polymarket 交易终端..."
@@ -17,27 +18,12 @@ if ! command -v python3 &>/dev/null; then
     exit 1
 fi
 
-# 2. 管理虚拟环境
-if [ ! -d "$VENV_DIR" ]; then
-    echo "📦 正在创建虚拟环境 (venv)..."
-    python3 -m venv "$VENV_DIR"
-fi
-
-# 3. 安装/更新依赖（仅 requirements.txt 变更时重装）
-echo "🛠️  正在检查依赖..."
-REQ_FILE="$ROOT_DIR/requirements.txt"
-MARKER_FILE="$VENV_DIR/.installed"
-if [ -f "$REQ_FILE" ]; then
-    if [ -f "$MARKER_FILE" ] && [ "$(cat "$MARKER_FILE" 2>/dev/null)" = "$(cksum "$REQ_FILE" 2>/dev/null | cut -d' ' -f1)" ]; then
-        echo "   ✓ 依赖已安装，跳过安装"
-    else
-        echo "   ↻ 检测到依赖变更，正在安装..."
-        "$VENV_DIR/bin/pip" install --quiet --upgrade pip 2>/dev/null
-        "$VENV_DIR/bin/pip" install --quiet -r "$REQ_FILE"
-        # 缓存当前 requirements.txt 的 hash
-        cksum "$REQ_FILE" 2>/dev/null | cut -d' ' -f1 > "$MARKER_FILE"
-        echo "   ✓ 依赖安装完成"
-    fi
+# 2/3. venv + 依赖由 start_paper_sim.sh 的 ensure_tmp_venv 统一处理
+#    （创建 /tmp/polymarket-fv-edge-venv、按 requirements 同步、Crypto 冒烟）
+if [[ -x "$TMP_VENV/bin/python3" ]]; then
+    echo "   ✓ 将使用 /tmp venv: $TMP_VENV"
+else
+    echo "   ↻ /tmp venv 不存在，启动脚本将自动创建: $TMP_VENV"
 fi
 
 # 4. 配置文件校验
@@ -52,20 +38,20 @@ if [ ! -f "$ROOT_DIR/.env" ]; then
     fi
 fi
 
-# 5. 确保 data 目录存在
-mkdir -p "$ROOT_DIR/data"
+# 5. 确保 data / runtime 目录存在
+mkdir -p "$ROOT_DIR/data" /tmp/polymarket-fv-edge/data /tmp/polymarket-fv-edge/logs
 
 # 6. 启动服务
-echo "🚦 正在延时启动交易引擎与监控服务器..."
+echo "🚦 正在启动交易引擎与监控服务器..."
 chmod +x "$SCRIPTS_DIR/start_paper_sim.sh"
 chmod +x "$SCRIPTS_DIR/stop_paper_sim.sh"
 
-# 运行启动脚本
 bash "$SCRIPTS_DIR/start_paper_sim.sh"
 
 echo "✨ 启动成功！"
 echo "----------------------------------------------------"
 echo "📊 控制台地址: http://localhost:8889"
+echo "🐍 解释器: ${TMP_VENV}/bin/python3"
 echo "🛑 如需停止，请运行: ./scripts/stop_paper_sim.sh"
 echo "----------------------------------------------------"
 
