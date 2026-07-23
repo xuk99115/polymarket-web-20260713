@@ -47,6 +47,7 @@ class DirectionFilter:
     _last_direction: DirectionState = DirectionState.UNKNOWN
     _confirm_count: int = 0
     _transition_target: Optional[DirectionState] = None
+    _last_raw_result: Optional[DirectionResult] = None
     _history: List[Dict[str, Any]] = field(default_factory=list)
 
     _shadow_stats: Dict[str, Any] = field(default_factory=dict)
@@ -74,6 +75,7 @@ class DirectionFilter:
             return cached
         self._last_calc_time = now
         raw = self._do_calculate()
+        self._last_raw_result = raw
         self._update_state_machine(raw)
         self._log_result(raw)
         self._write_status(raw)
@@ -91,7 +93,7 @@ class DirectionFilter:
         direction = result.direction
         outcome_label = signal.get("outcome_label", "")
         would_allow = (
-            direction == DirectionState.NEUTRAL
+            direction in {DirectionState.NEUTRAL, DirectionState.UNKNOWN, DirectionState.TRANSITION}
             or (direction == DirectionState.UP and outcome_label == "Up")
             or (direction == DirectionState.DOWN and outcome_label == "Down")
         )
@@ -281,7 +283,12 @@ class DirectionFilter:
             logger.warning("Failed to write cached direction state: %s", e)
 
     def _cached_result(self, now: float) -> DirectionResult:
+        raw = self._last_raw_result
         return DirectionResult(direction=self._last_direction,
+                               pct_15m=raw.pct_15m if raw else 0.0,
+                               pct_60m=raw.pct_60m if raw else 0.0,
+                               data_points_15m=raw.data_points_15m if raw else 0,
+                               data_points_60m=raw.data_points_60m if raw else 0,
                                stale_seconds=now - self._last_calc_time,
                                confirmed_count=self._confirm_count)
 

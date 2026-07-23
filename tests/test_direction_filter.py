@@ -191,20 +191,20 @@ def test_shadow_decision_records_enforce_block_without_blocking_trade():
 
     assert decision["direction_mode"] == "shadow"
     assert decision["direction_gate"] == "UNKNOWN"
-    assert decision["direction_would_allow"] is False
+    assert decision["direction_would_allow"] is True
     assert f.should_allow_trade({"outcome_label": "Up", "slug": "test"}) is True
 
 
-def test_enforce_unknown_blocks():
+def test_enforce_unknown_allows_during_soft_transition():
     f = DirectionFilter(mode="enforce")
     f.set_history([])
     signal = {"outcome_label": "Up", "slug": "test"}
     result = f.calculate()
     assert result.direction == DirectionState.UNKNOWN
-    assert f.should_allow_trade(signal) is False
+    assert f.should_allow_trade(signal) is True
 
 
-def test_enforce_transition_blocks():
+def test_enforce_transition_allows_both_during_soft_transition():
     now = time.time()
     ticks_up = _mk(now, [(100.0,3600),(100.5,900),(101.0,0)])
     f = DirectionFilter(mode="enforce", update_seconds=1)
@@ -217,9 +217,21 @@ def test_enforce_transition_blocks():
     r2 = f.calculate(now=now + 1)
     assert r2.direction == DirectionState.TRANSITION, f"Should be TRANSITION, got {r2.direction}"
     
-    # TRANSITION 期间 enforce 禁止所有方向
-    signal = {"outcome_label": "Down", "slug": "test"}
-    assert f.should_allow_trade(signal) is False
+    assert f.should_allow_trade({"outcome_label": "Up", "slug": "test"}) is True
+    assert f.should_allow_trade({"outcome_label": "Down", "slug": "test"}) is True
+
+
+def test_cached_evaluation_preserves_direction_percentages():
+    now = time.time()
+    ticks = _mk(now, [(100.0, 3600), (100.5, 900), (101.0, 0)])
+    f = DirectionFilter(mode="enforce", update_seconds=60)
+    f.set_history(ticks)
+    first = f.calculate(now=now)
+    cached = f.evaluate_trade({"outcome_label": "Up"}, now=now + 1)
+    assert abs(first.pct_15m - 0.4975) < 0.0001
+    assert first.pct_60m == 1.0
+    assert cached["direction_pct_15m"] == first.pct_15m
+    assert cached["direction_pct_60m"] == first.pct_60m
 
 
 def test_neutral_allows_both():
@@ -266,8 +278,8 @@ if __name__ == "__main__":
         test_up_strict_same_direction, test_cold_start_insufficient_window,
         test_confirm_twice, test_transition_then_confirm, test_transition_cancel_on_up,
         test_data_stale_resets_to_unknown, test_confirmed_direction_not_reset_by_same,
-        test_shadow_does_not_block, test_enforce_unknown_blocks,
-        test_enforce_transition_blocks, test_neutral_allows_both,
+        test_shadow_does_not_block, test_enforce_unknown_allows_during_soft_transition,
+        test_enforce_transition_allows_both_during_soft_transition, test_neutral_allows_both,
         test_up_enforce_blocks_down,
         test_integration_methods_exist,
     ]
