@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from src.trading.fv_edge import FVEdgeStrategy
+from src.trading.manager import TradingBotManager
 
 
 def make_market(now, *, up_ask=0.55, down_ask=0.45):
@@ -94,3 +95,25 @@ def test_price_filter_is_public_and_inclusive():
     assert strategy.accepts_price(0.1)
     assert strategy.accepts_price(0.85)
     assert not strategy.accepts_price(0.09)
+
+
+def test_book_observation_captures_depth_and_stake_vwap():
+    observed = TradingBotManager._book_observation(
+        {
+            "best_bid": 0.40,
+            "best_ask": 0.45,
+            "book_observed_at": "2026-07-23T00:00:00+00:00",
+            "depth_bids": [{"price": 0.40, "size": 10}],
+            "depth_asks": [
+                {"price": 0.45, "size": 2},
+                {"price": 0.46, "size": 10},
+            ],
+        },
+        target_stake=1.0,
+    )
+    assert observed["best_ask"] == 0.45
+    assert observed["depth_asks"] == [
+        {"price": 0.45, "size": 2},
+        {"price": 0.46, "size": 10},
+    ]
+    assert abs(observed["executable_vwap_for_stake"] - 0.45098039) < 1e-8

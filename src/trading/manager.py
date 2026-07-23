@@ -102,6 +102,7 @@ class TradingBotManager:
     BTC_SNAPSHOT_FILE = os.path.join(_RUNTIME_DIR, "btc_snapshot.json")
     BTC_WINDOW_REFS_FILE = os.path.join(_RUNTIME_DIR, "btc_window_refs.json")
     POSITION_AUDIT_FILE = os.path.join(_RUNTIME_DIR, "position_audit.jsonl")
+    EXECUTION_OBSERVATION_FILE = os.path.join(_RUNTIME_DIR, "execution_observations.jsonl")
 
     # 日志型数据 → 临时卷（EIO 无害）
     BTC_TICKS_FILE = os.path.join(_RUNTIME_DIR, "btc_ticks.jsonl")
@@ -136,6 +137,7 @@ class TradingBotManager:
         self._market_cache: List[Dict[str, Any]] = []
         self._market_cache_at = 0.0
         self._latest_markets: List[Dict[str, Any]] = []
+        self._execution_observations: Dict[str, Dict[str, Any]] = {}
         self._latest_btc: Dict[str, Any] = {}
         self._btc_history: List[Dict[str, Any]] = []
         self._btc_window_refs: Dict[str, Dict[str, Any]] = (
@@ -473,6 +475,100 @@ class TradingBotManager:
         self._record_signal_history(signal_to_execute, fresh_market, result, now_utc)
         self._refresh_summary()
         return result
+
+    @staticmethod
+    def _book_observation(
+        outcome: Dict[str, Any], target_stake: Optional[float] = None
+    ) -> Dict[str, Any]:
+        """Extract quote/depth telemetry without affecting execution."""
+        def levels(key: str) -> List[Dict[str, float]]:
+            result = []
+            for item in (outcome.get(key) or [])[:5]:
+                price = safe_float(item.get("price"))
+                size = safe_float(item.get("size"), item.get("quantity"))
+                if price is not None and size is not None and size > 0:
+                    result.append({"price": price, "size": size})
+            return result
+
+        asks = levels("depth_asks")
+        bids = levels("depth_bids")
+        vwap = None
+        if target_stake and target_stake > 0 and asks:
+            remaining = target_stake
+            shares = 0.0
+            for level in asks:
+                take = min(level["size"], remaining / level["price"])
+                shares += take
+                remaining -= take * level["price"]
+                if remaining <= 1e-9:
+                    break
+            if shares > 0 and remaining <= 1e-9:
+                vwap = round(target_stake / shares, 8)
+        return {
+            "best_bid": safe_float(outcome.get("best_bid")),
+            "best_ask": safe_float(outcome.get("best_ask")),
+            "depth_bids": bids,
+            "depth_asks": asks,
+            "executable_vwap_for_stake": vwap,
+            "book_observed_at": outcome.get("book_observed_at"),
+        }
+
+    @classmethod
+    def _append_execution_observation(cls, event: Dict[str, Any]) -> bool:
+        return cls._append_jsonl(cls.EXECUTION_OBSERVATION_FILE, event)
+
+    def _record_signal_observations(
+        self, signals: List[Dict[str, Any]], markets: List[Dict[str, Any]], now_utc: datetime
+    ) -> None:
+        by_slug = {market.get("slug"): market for market in markets}
+        for signal in signals:
+            market = by_slug.get(signal.get("slug"))
+            index = signal.get("outcome_index")
+            outcomes = market.get("outcomes", []) if market else []
+            if not isinstance(index, int) or index >= len(outcomes):
+                continue
+            key = f"{signal.get('slug')}:{index}"
+            if key in self._execution_observations:
+                continue
+            observation_id = f"obs-{now_utc.strftime('%Y%m%d%H%M%S')}-{len(self._execution_observations):04d}"
+            stake = safe_float(signal.get("stake"), 0.0) or 0.0
+            self._execution_observations[key] = {
+                "observation_id": observation_id, "signal_at": now_utc,
+                "slug": signal.get("slug"), "outcome_index": index,
+                "outcome_label": signal.get("outcome_label"), "stake": stake,
+                "targets": set(),
+            }
+            self._append_jsonl(self.EXECUTION_OBSERVATION_FILE, {
+                "event": "signal", "t": now_utc.isoformat(), "observation_id": observation_id,
+                "slug": signal.get("slug"), "outcome_index": index,
+                "outcome_label": signal.get("outcome_label"), "stake": stake,
+                "signal_ask": signal.get("current_ask"), "edge_bps": signal.get("edge_bps"),
+                "book": self._book_observation(outcomes[index], stake),
+            })
+
+    def _update_execution_observations(
+        self, markets: List[Dict[str, Any]], now_utc: datetime
+    ) -> None:
+        by_slug = {market.get("slug"): market for market in markets}
+        for key, observation in list(self._execution_observations.items()):
+            elapsed = (now_utc - observation["signal_at"]).total_seconds()
+            due = next((s for s in (1, 3, 5) if s not in observation["targets"] and elapsed >= s), None)
+            if due is None:
+                if elapsed >= 5:
+                    self._execution_observations.pop(key, None)
+                continue
+            market = by_slug.get(observation["slug"])
+            outcomes = market.get("outcomes", []) if market else []
+            index = observation["outcome_index"]
+            if not isinstance(index, int) or index >= len(outcomes):
+                continue
+            self._append_jsonl(self.EXECUTION_OBSERVATION_FILE, {
+                "event": "followup", "t": now_utc.isoformat(), "target_seconds": due,
+                "elapsed_seconds": round(elapsed, 3), "observation_id": observation["observation_id"],
+                "slug": observation["slug"], "outcome_label": observation["outcome_label"],
+                "book": self._book_observation(outcomes[index], observation["stake"]),
+            })
+            observation["targets"].add(due)
 
     def _record_signal_history(
         self,
@@ -834,6 +930,7 @@ class TradingBotManager:
         self._latest_markets = markets
         if markets:
             await self._refresh_books(markets)
+        self._update_execution_observations(markets, now_utc)
         messages = await self._manage_positions(now_utc, markets)
 
         signals: List[Dict[str, Any]] = []
@@ -858,6 +955,7 @@ class TradingBotManager:
                 # 会导致 bot 活着但 direction_updated_at 过期。
                 dir_filter.calculate(now_utc.timestamp())
             signals = self.fv_edge.scan(markets, now_utc, direction_filter=dir_filter)
+            self._record_signal_observations(signals, markets, now_utc)
             by_slug = {market.get("slug"): market for market in markets}
             for signal in signals:
                 market = by_slug.get(signal.get("slug"))
