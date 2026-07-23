@@ -116,6 +116,8 @@ class TradingBotManager:
         self.fv_edge = FVEdgeStrategy(
             position_usd=Config.get_float("FV_EDGE_POSITION_USD", "2.0"),
             threshold_bps=Config.get_float("FV_EDGE_THRESHOLD_BPS", "300"),
+            threshold_up_bps=Config.get_float("FV_EDGE_UP_THRESHOLD_BPS", "1200"),
+            threshold_down_bps=Config.get_float("FV_EDGE_DOWN_THRESHOLD_BPS", "800"),
             max_mte=Config.get_float("FV_EDGE_MAX_MTE", "1.5"),
             min_price=Config.get_float("FV_EDGE_MIN_PRICE", "0.10"),
             max_price=Config.get_float("FV_EDGE_MAX_PRICE", "0.85"),

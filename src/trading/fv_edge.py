@@ -23,6 +23,8 @@ logger = logging.getLogger("fv_edge")
 
 # Tunables (validated 2026-07-10 by scripts/analyze_fv_edge_combined.py)
 FV_EDGE_THRESHOLD_BPS = 500       # 5% minimum edge to act (raised 2026-07-17: 300-500bps 区间 4 笔全输)
+FV_EDGE_UP_THRESHOLD_BPS = 1200   # directional threshold tuned from 96h counterfactual replay
+FV_EDGE_DOWN_THRESHOLD_BPS = 800  # directional threshold tuned from 96h counterfactual replay
 FV_EDGE_MAX_MTE = 1.5             # 1.5 minutes: only trade fresh signals (tightened 2026-07-18)
 FV_EDGE_MIN_PRICE = 0.10          # avoid illiquid penny trades
 FV_EDGE_MAX_PRICE = 0.85          # avoid 90c+ late bias zone
@@ -68,6 +70,8 @@ class FVEdgeStrategy:
         position_usd: float = FV_EDGE_DEFAULT_POSITION_USD,
         *,
         threshold_bps: float = FV_EDGE_THRESHOLD_BPS,
+        threshold_up_bps: Optional[float] = None,
+        threshold_down_bps: Optional[float] = None,
         max_mte: float = FV_EDGE_MAX_MTE,
         min_price: float = FV_EDGE_MIN_PRICE,
         max_price: float = FV_EDGE_MAX_PRICE,
@@ -80,6 +84,8 @@ class FVEdgeStrategy:
         self._window_refs: Dict[str, Dict[str, Any]] = {}
         self._position_usd = float(position_usd or FV_EDGE_DEFAULT_POSITION_USD)
         self._threshold_bps = max(0.0, float(threshold_bps))
+        self._threshold_up_bps = max(0.0, float(threshold_up_bps if threshold_up_bps is not None else self._threshold_bps))
+        self._threshold_down_bps = max(0.0, float(threshold_down_bps if threshold_down_bps is not None else self._threshold_bps))
         self._max_mte = max(0.0, float(max_mte))
         self._min_price = max(0.0, float(min_price))
         self._max_price = min(1.0, float(max_price))
@@ -329,7 +335,8 @@ class FVEdgeStrategy:
         edge_bps, outcome_index, outcome_label, buy_price, buy_bid = max(
             candidates, key=lambda item: item[0]
         )
-        if edge_bps < self._threshold_bps:
+        threshold_bps = self._threshold_up_bps if outcome_index == 0 else self._threshold_down_bps
+        if edge_bps < threshold_bps:
             return None
 
         # Price range filter
@@ -385,6 +392,7 @@ class FVEdgeStrategy:
             # Diagnostics consumed by status export and signal history.
             "fair_up": round(fair_up, 4),
             "edge_bps": round(edge_bps, 1),
+            "threshold_bps": round(threshold_bps, 1),
             "edge_up_bps": round(edge_up_bps, 1),
             "edge_down_bps": round(edge_down_bps, 1),
             "fair_selected": round(selected_fair, 4),
@@ -430,6 +438,8 @@ class FVEdgeStrategy:
             "position_usd": self._position_usd,
             "thresholds": {
                 "edge_bps": self._threshold_bps,
+                "edge_up_bps": self._threshold_up_bps,
+                "edge_down_bps": self._threshold_down_bps,
                 "max_mte": self._max_mte,
                 "min_price": self._min_price,
                 "max_price": self._max_price,

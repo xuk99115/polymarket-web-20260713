@@ -1,11 +1,15 @@
 {
   "trading_enabled": true,
-  "updated_at": "2026-07-15T00:00:00",
+  "updated_at": "2026-07-22T01:20:27.476233+00:00",
   "TRADING_MODE": "paper_live",
   "MARKET_SELECTION_MODE": "auto_btc_15m",
   "FV_EDGE_POSITION_USD": 2.0,
-  "FV_EDGE_THRESHOLD_BPS": 500,
+  "FV_EDGE_THRESHOLD_BPS": 300,
   "FV_EDGE_MAX_MTE": 1.5,
   "FV_EDGE_MAX_OPEN_POSITIONS": 1,
-  "FV_EDGE_MAX_BTC_AGE_SECONDS": 10
+  "FV_EDGE_MAX_BTC_AGE_SECONDS": 10,
+  "FV_EDGE_UP_THRESHOLD_BPS": 1200,
+  "FV_EDGE_DOWN_THRESHOLD_BPS": 800,
+  "fv_edge_threshold_boundary_utc": "2026-07-22T01:17:46Z",
+  "fv_edge_threshold_boundary_note": "Up>=1200bps, Down>=800bps, keep $3 sizing for edge>=800 and ask>=0.70"
 }

@@ -261,7 +261,7 @@ def fetch_order_book(slug, timeout=10):
             "source": "closed",
             "market": snapshot.get("question") or slug,
             "closed": True,
-            "message": "盘口已关闭，当前无活跃 BTC 15m 窗口",
+            "message": "当前盘口已结算，等待下一次盘口刷新",
             "outcomes": [],
         }
     token_ids = _parse_json_list(snapshot.get("clobTokenIds"))
