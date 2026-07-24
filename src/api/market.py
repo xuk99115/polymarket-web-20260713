@@ -632,20 +632,18 @@ class BTCDataprovider:
 
     async def get_signal_context(self, market_end_utc=None) -> Optional[Dict[str, Any]]:
         source = "chainlink" if Config.get_bool("FV_EDGE_REQUIRE_CHAINLINK", "true") else Config.get("BTC_PRICE_SOURCE", "chainlink")
+        if source == "chainlink":
+            # Chainlink RTDS is authoritative. Do not call Binance for auxiliary
+            # context unless explicitly re-enabled; the manager estimates sigma
+            # from Chainlink ticks and recomputes FV from Chainlink ref/spot.
+            if not Config.get_bool("BTC_ENABLE_BINANCE_CONTEXT", "false"):
+                return None
+            return await self._get_binance_signal_context()
         if source == "binance":
-            ctx = await self._get_binance_signal_context()
-        elif source == "chainlink":
-            # Binance remains a volatility-only input; its price never enters
-            # FV when Chainlink is the configured execution source.
-            ctx = await self._get_binance_signal_context()
-        else:
-            ctx = await self.get_price()
-
-        # 增量集成: Kronos 预测已禁用 (2026-06-25)
-        if ctx and source == "binance":
-            pass
-
-        return ctx
+            return await self._get_binance_signal_context()
+        if Config.get_bool("BTC_ENABLE_COINGECKO_CONTEXT", "false"):
+            return await self.get_price()
+        return None
 
     async def _get_chainlink_price(self) -> Optional[Dict[str, Any]]:
         """Return only a fresh Chainlink measurement; never fall back to spot."""

@@ -89,6 +89,20 @@ def get_btc_price():
         cached["cache_age_secs"] = int(now - _BTC_CACHE_TS)
         return cached
 
+    # Binance/CoinGecko are optional dashboard fallbacks. Default off because the
+    # trading bot uses Chainlink RTDS and these public sources create proxy/429 noise.
+    if not os.environ.get("STATUS_ENABLE_EXTERNAL_BTC", "").lower() in {"true", "1", "yes", "on"}:
+        snapshot = _load_snapshot_price(max_age_secs=3600.0)
+        if snapshot:
+            return snapshot
+        if _BTC_CACHE:
+            cached = dict(_BTC_CACHE)
+            cached["cached"] = True
+            cached["cache_age_secs"] = int(now - _BTC_CACHE_TS)
+            cached["warning"] = "external BTC sources disabled; using last cached value"
+            return cached
+        return {"error": "BTC snapshot unavailable and external BTC sources disabled"}
+
     proxy_url = os.environ.get("BINANCE_PROXY_URL", "")
     proxy_urls = os.environ.get("BINANCE_PROXY_URLS", "")
     proxies = [p.strip() for p in proxy_urls.split(",") if p.strip()]

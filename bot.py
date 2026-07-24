@@ -10,6 +10,7 @@ from logging.handlers import RotatingFileHandler
 import signal
 import sys
 import os
+from src.core.sync_runtime import force_sync, periodic_sync
 
 def configure_logging(
     log_dir: str | None = None,
@@ -60,14 +61,43 @@ async def main():
     # 注册 SIGTERM/SIGINT 处理器
     def _signal_handler():
         logger.info("Received shutdown signal")
+        manager.running = False
         _stop_event.set()
 
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, _signal_handler)
 
+    periodic_task = asyncio.create_task(
+        periodic_sync(
+            os.environ.get("RUNTIME_DIR", "/tmp/polymarket-fv-edge/data"),
+            os.environ.get("PERSIST_DIR", os.path.join(os.path.dirname(__file__), "data")),
+            interval=float(os.environ.get("RUNTIME_SYNC_INTERVAL_SECONDS", "300")),
+            stop_event=_stop_event,
+        ),
+        name="runtime-periodic-sync",
+    )
+
     # 运行交易主循环
-    await manager.start()
+    try:
+        await manager.start()
+    finally:
+        _stop_event.set()
+        try:
+            await asyncio.wait_for(periodic_task, timeout=5.0)
+        except Exception:
+            periodic_task.cancel()
+            try:
+                await periodic_task
+            except Exception:
+                pass
+        try:
+            force_sync(
+                os.environ.get("RUNTIME_DIR", "/tmp/polymarket-fv-edge/data"),
+                os.environ.get("PERSIST_DIR", os.path.join(os.path.dirname(__file__), "data")),
+            )
+        except Exception as exc:
+            logger.warning("Final force sync failed: %s", exc)
 
 
 if __name__ == "__main__":
